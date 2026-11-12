@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import fs from 'node:fs';
 import path from 'node:path';
+import { saveAppSetting } from '@/lib/db';
 
 export async function GET(req: NextRequest) {
   const code = req.nextUrl.searchParams.get('code');
@@ -41,8 +42,9 @@ export async function GET(req: NextRequest) {
     const refreshToken = data.refresh_token;
     const grantedScopes = data.scope || '';
 
-    // Update in memory
+    // Update in memory & database (for permanent persistence on Vercel)
     process.env.GOOGLE_REFRESH_TOKEN = refreshToken;
+    await saveAppSetting('GOOGLE_REFRESH_TOKEN', refreshToken);
 
     // Persist to .env.local if running in local environment
     try {

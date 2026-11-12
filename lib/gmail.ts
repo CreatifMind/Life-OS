@@ -4,6 +4,7 @@
  */
 
 import { EmailThread } from './types';
+import { getAppSetting } from './db';
 
 const CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
 const CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '';
@@ -16,8 +17,12 @@ export async function getFreshAccessToken(): Promise<string> {
     return cachedAccessToken.token;
   }
 
-  if (!REFRESH_TOKEN || !CLIENT_ID || !CLIENT_SECRET) {
-    throw new Error('Missing Google OAuth credentials in .env.local');
+  // Check Supabase app_settings first (for tokens updated via OAuth on Vercel), fallback to env
+  const dbToken = await getAppSetting('GOOGLE_REFRESH_TOKEN');
+  const activeRefreshToken = dbToken || process.env.GOOGLE_REFRESH_TOKEN || REFRESH_TOKEN;
+
+  if (!activeRefreshToken || !CLIENT_ID || !CLIENT_SECRET) {
+    throw new Error('Missing Google OAuth credentials in environment or database');
   }
 
   const res = await fetch('https://oauth2.googleapis.com/token', {
@@ -26,7 +31,7 @@ export async function getFreshAccessToken(): Promise<string> {
     body: new URLSearchParams({
       client_id: CLIENT_ID,
       client_secret: CLIENT_SECRET,
-      refresh_token: REFRESH_TOKEN,
+      refresh_token: activeRefreshToken,
       grant_type: 'refresh_token',
     }),
   });

@@ -16,8 +16,9 @@ function getPool(): pg.Pool | null {
     pool = new pg.Pool({
       connectionString,
       ssl: { rejectUnauthorized: false },
-      max: 10,
+      max: process.env.NODE_ENV === 'production' ? 2 : 10,
       idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 10000,
     });
   }
   return pool;
@@ -109,4 +110,31 @@ export async function logSyncAudit(service: string, success: boolean, details?: 
     details?.eventsCount || 0,
     details ? JSON.stringify(details) : undefined
   );
+}
+
+export async function getAppSetting(key: string): Promise<string | null> {
+  const p = getPool();
+  if (!p) return null;
+  try {
+    const res = await p.query(`SELECT value FROM app_settings WHERE key = $1 LIMIT 1`, [key]);
+    if (res.rows.length === 0) return null;
+    return res.rows[0].value;
+  } catch (err: any) {
+    console.warn(`Could not read setting ${key} from Supabase:`, err.message);
+    return null;
+  }
+}
+
+export async function saveAppSetting(key: string, value: string): Promise<void> {
+  const p = getPool();
+  if (!p) return;
+  try {
+    await p.query(
+      `INSERT INTO app_settings (key, value, updated_at) VALUES ($1, $2, NOW())
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
+      [key, value]
+    );
+  } catch (err: any) {
+    console.error(`Could not save setting ${key} to Supabase:`, err.message);
+  }
 }
