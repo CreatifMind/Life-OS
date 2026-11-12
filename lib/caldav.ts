@@ -4,6 +4,7 @@
  */
 
 import { CalendarEvent, ReminderTask } from './types';
+import { getSyncedReminders, updateSyncedReminderStatus } from './db';
 
 const APPLE_ID = process.env.APPLE_ID || '';
 const APPLE_APP_SPECIFIC_PASSWORD = process.env.APPLE_APP_SPECIFIC_PASSWORD || '';
@@ -198,11 +199,23 @@ export async function fetchLiveCalendarEvents(daysPast = 14, daysFuture = 30): P
 }
 
 export async function fetchLiveReminders(): Promise<ReminderTask[]> {
-  const { reminderLists } = await discoverCollections();
-  const allTasks: ReminderTask[] = [];
+  // 1. Fetch synced reminders from Supabase (from Apple Shortcuts webhook)
+  let syncedTasks: ReminderTask[] = [];
+  try {
+    syncedTasks = await getSyncedReminders();
+  } catch (err) {
+    console.warn('Could not load synced reminders from db:', err);
+  }
 
-  for (const list of reminderLists) {
-    const reportBody = `<?xml version="1.0" encoding="utf-8" ?>
+  const allTasks: ReminderTask[] = [...syncedTasks];
+  const seenTitles = new Set(syncedTasks.map(t => t.title.toLowerCase().trim()));
+
+  // 2. Fetch direct CalDAV tasks (if any)
+  try {
+    const { reminderLists } = await discoverCollections();
+
+    for (const list of reminderLists) {
+      const reportBody = `<?xml version="1.0" encoding="utf-8" ?>
 <c:calendar-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
   <d:prop><d:getetag /><c:calendar-data /></d:prop>
   <c:filter>
@@ -212,53 +225,61 @@ export async function fetchLiveReminders(): Promise<ReminderTask[]> {
   </c:filter>
 </c:calendar-query>`;
 
-    const res = await davRequest(list.url, 'REPORT', {
-      'Depth': '1',
-      'Content-Type': 'application/xml; charset=utf-8',
-    }, reportBody);
+      const res = await davRequest(list.url, 'REPORT', {
+        'Depth': '1',
+        'Content-Type': 'application/xml; charset=utf-8',
+      }, reportBody);
 
-    const todoBlocks = [...res.text.matchAll(/BEGIN:VTODO[\s\S]*?END:VTODO/gi)];
-    for (const tb of todoBlocks) {
-      const v = tb[0];
-      const uidMatch = /UID:(.*)/i.exec(v);
-      const summaryMatch = /SUMMARY:(.*)/i.exec(v);
-      const statusMatch = /STATUS:(.*)/i.exec(v);
-      const priorityMatch = /PRIORITY:(.*)/i.exec(v);
-      const dueMatch = /DUE(?:;[^:]+)?:(.*)/i.exec(v);
-      const completedMatch = /COMPLETED(?:;[^:]+)?:(.*)/i.exec(v);
-      const descMatch = /DESCRIPTION:(.*)/i.exec(v);
+      const todoBlocks = [...res.text.matchAll(/BEGIN:VTODO[\s\S]*?END:VTODO/gi)];
+      for (const tb of todoBlocks) {
+        const v = tb[0];
+        const uidMatch = /UID:(.*)/i.exec(v);
+        const summaryMatch = /SUMMARY:(.*)/i.exec(v);
+        const statusMatch = /STATUS:(.*)/i.exec(v);
+        const priorityMatch = /PRIORITY:(.*)/i.exec(v);
+        const dueMatch = /DUE(?:;[^:]+)?:(.*)/i.exec(v);
+        const completedMatch = /COMPLETED(?:;[^:]+)?:(.*)/i.exec(v);
+        const descMatch = /DESCRIPTION:(.*)/i.exec(v);
 
-      if (!summaryMatch) continue;
+        if (!summaryMatch) continue;
 
-      const rawTitle = summaryMatch[1].trim();
-      const lower = rawTitle.toLowerCase();
-      // Filter out Apple CloudKit legacy migration placeholder strings
-      if (lower.includes('where are my reminders') || lower.includes('upgraded these reminders')) {
-        continue;
+        const rawTitle = summaryMatch[1].trim();
+        const lower = rawTitle.toLowerCase();
+        // Filter out Apple CloudKit legacy migration placeholder strings
+        if (lower.includes('where are my reminders') || lower.includes('upgraded these reminders')) {
+          continue;
+        }
+
+        if (seenTitles.has(lower)) {
+          continue;
+        }
+
+        const uid = uidMatch ? uidMatch[1].trim() : `task-${Math.random()}`;
+        const status = statusMatch ? statusMatch[1].trim().toUpperCase() : 'NEEDS-ACTION';
+        const isCompleted = status === 'COMPLETED';
+
+        const prioRaw = priorityMatch ? parseInt(priorityMatch[1].trim(), 10) : 0;
+        let priority: 0 | 1 | 5 | 9 = 0;
+        if (prioRaw === 1) priority = 1;
+        else if (prioRaw === 5) priority = 5;
+        else if (prioRaw === 9) priority = 9;
+
+        allTasks.push({
+          id: uid,
+          uid,
+          title: summaryMatch[1].trim(),
+          listName: list.name,
+          isCompleted,
+          priority,
+          dueDate: dueMatch ? parseIcsDate(dueMatch[1].trim()) : undefined,
+          completedAt: completedMatch ? parseIcsDate(completedMatch[1].trim()) : undefined,
+          notes: descMatch ? descMatch[1].trim() : undefined,
+        });
+        seenTitles.add(lower);
       }
-
-      const uid = uidMatch ? uidMatch[1].trim() : `task-${Math.random()}`;
-      const status = statusMatch ? statusMatch[1].trim().toUpperCase() : 'NEEDS-ACTION';
-      const isCompleted = status === 'COMPLETED';
-
-      const prioRaw = priorityMatch ? parseInt(priorityMatch[1].trim(), 10) : 0;
-      let priority: 0 | 1 | 5 | 9 = 0;
-      if (prioRaw === 1) priority = 1;
-      else if (prioRaw === 5) priority = 5;
-      else if (prioRaw === 9) priority = 9;
-
-      allTasks.push({
-        id: uid,
-        uid,
-        title: summaryMatch[1].trim(),
-        listName: list.name,
-        isCompleted,
-        priority,
-        dueDate: dueMatch ? parseIcsDate(dueMatch[1].trim()) : undefined,
-        completedAt: completedMatch ? parseIcsDate(completedMatch[1].trim()) : undefined,
-        notes: descMatch ? descMatch[1].trim() : undefined,
-      });
     }
+  } catch (err) {
+    console.warn('CalDAV reminders fetch error:', err);
   }
 
   return allTasks;
@@ -305,36 +326,45 @@ STATUS:NEEDS-ACTION
 }
 
 export async function markAppleReminderComplete(taskUid: string, isCompleted: boolean = true, title?: string): Promise<void> {
-  const { reminderLists } = await discoverCollections();
-  const targetList = reminderLists[0];
-  if (!targetList) return;
+  // 1. Update in Supabase synced reminders cache
+  try {
+    await updateSyncedReminderStatus(taskUid, isCompleted);
+  } catch (err) {
+    console.warn('Could not update synced reminder status in db:', err);
+  }
 
-  const itemUrl = targetList.url.endsWith('/') ? `${targetList.url}${taskUid}.ics` : `${targetList.url}/${taskUid}.ics`;
-  const timestamp = new Date().toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+  // 2. Also attempt CalDAV update if a CalDAV collection exists
+  try {
+    const { reminderLists } = await discoverCollections();
+    const targetList = reminderLists[0];
+    if (!targetList) return;
 
-  // Fetch existing ICS to preserve the original task title and metadata
-  const existing = await davRequest(itemUrl, 'GET');
-  let vtodo = '';
+    const itemUrl = targetList.url.endsWith('/') ? `${targetList.url}${taskUid}.ics` : `${targetList.url}/${taskUid}.ics`;
+    const timestamp = new Date().toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
 
-  if (existing.status === 200 && existing.text.includes('BEGIN:VTODO')) {
-    vtodo = existing.text;
-    if (vtodo.includes('STATUS:')) {
-      vtodo = vtodo.replace(/STATUS:[^\r\n]*/i, `STATUS:${isCompleted ? 'COMPLETED' : 'NEEDS-ACTION'}`);
-    } else {
-      vtodo = vtodo.replace(/END:VTODO/i, `STATUS:${isCompleted ? 'COMPLETED' : 'NEEDS-ACTION'}\nEND:VTODO`);
-    }
+    // Fetch existing ICS to preserve the original task title and metadata
+    const existing = await davRequest(itemUrl, 'GET');
+    let vtodo = '';
 
-    if (isCompleted) {
-      if (vtodo.includes('COMPLETED:')) {
-        vtodo = vtodo.replace(/COMPLETED:[^\r\n]*/i, `COMPLETED:${timestamp}`);
+    if (existing.status === 200 && existing.text.includes('BEGIN:VTODO')) {
+      vtodo = existing.text;
+      if (vtodo.includes('STATUS:')) {
+        vtodo = vtodo.replace(/STATUS:[^\r\n]*/i, `STATUS:${isCompleted ? 'COMPLETED' : 'NEEDS-ACTION'}`);
       } else {
-        vtodo = vtodo.replace(/END:VTODO/i, `COMPLETED:${timestamp}\nEND:VTODO`);
+        vtodo = vtodo.replace(/END:VTODO/i, `STATUS:${isCompleted ? 'COMPLETED' : 'NEEDS-ACTION'}\nEND:VTODO`);
+      }
+
+      if (isCompleted) {
+        if (vtodo.includes('COMPLETED:')) {
+          vtodo = vtodo.replace(/COMPLETED:[^\r\n]*/i, `COMPLETED:${timestamp}`);
+        } else {
+          vtodo = vtodo.replace(/END:VTODO/i, `COMPLETED:${timestamp}\nEND:VTODO`);
+        }
+      } else {
+        vtodo = vtodo.replace(/COMPLETED:[^\r\n]*[\r\n]*/i, '');
       }
     } else {
-      vtodo = vtodo.replace(/COMPLETED:[^\r\n]*[\r\n]*/i, '');
-    }
-  } else {
-    vtodo = `BEGIN:VCALENDAR
+      vtodo = `BEGIN:VCALENDAR
 VERSION:2.0
 PRODID:-//LifeOS//CalDAV//EN
 BEGIN:VTODO
@@ -344,11 +374,14 @@ SUMMARY:${title || 'Task'}
 STATUS:${isCompleted ? 'COMPLETED' : 'NEEDS-ACTION'}
 ${isCompleted ? `COMPLETED:${timestamp}\n` : ''}END:VTODO
 END:VCALENDAR`;
-  }
+    }
 
-  await davRequest(itemUrl, 'PUT', {
-    'Content-Type': 'text/calendar; charset=utf-8',
-  }, vtodo);
+    await davRequest(itemUrl, 'PUT', {
+      'Content-Type': 'text/calendar; charset=utf-8',
+    }, vtodo);
+  } catch (davErr) {
+    console.warn('CalDAV mark complete error (normal if using upgraded Reminders):', davErr);
+  }
 }
 
 const DEFAULT_TIMEZONE_OFFSET = process.env.TIMEZONE_OFFSET || '+08:00';

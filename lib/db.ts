@@ -138,3 +138,27 @@ export async function saveAppSetting(key: string, value: string): Promise<void> 
     console.error(`Could not save setting ${key} to Supabase:`, err.message);
   }
 }
+
+export async function saveSyncedReminders(reminders: any[]): Promise<void> {
+  await saveAppSetting('SYNCED_REMINDERS', JSON.stringify(reminders));
+}
+
+export async function getSyncedReminders(): Promise<any[]> {
+  const raw = await getAppSetting('SYNCED_REMINDERS');
+  if (!raw) return [];
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return [];
+  }
+}
+
+export async function updateSyncedReminderStatus(uid: string, isCompleted: boolean): Promise<void> {
+  const existing = await getSyncedReminders();
+  const updated = existing.map(r =>
+    r.uid === uid || r.id === uid
+      ? { ...r, isCompleted, completedAt: isCompleted ? new Date().toISOString() : undefined }
+      : r
+  );
+  await saveSyncedReminders(updated);
+}
