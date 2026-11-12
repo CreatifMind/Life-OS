@@ -8,9 +8,12 @@ interface GmailTriageWidgetProps {
   emails: EmailThread[];
   isLoading: boolean;
   onConvertToTask: (email: EmailThread) => void;
+  health?: { status: string; message?: string };
 }
 
-export function GmailTriageWidget({ emails, isLoading, onConvertToTask }: GmailTriageWidgetProps) {
+export function GmailTriageWidget({ emails, isLoading, onConvertToTask, health }: GmailTriageWidgetProps) {
+  const isError = health?.status === 'ERROR';
+
   return (
     <div className="rounded-2xl p-5 md:p-6 bg-zinc-900/60 border border-zinc-800/80 shadow-lg flex flex-col h-full">
       <div className="flex items-center justify-between mb-4">
@@ -29,6 +32,22 @@ export function GmailTriageWidget({ emails, isLoading, onConvertToTask }: GmailT
         <div className="space-y-3 py-4 animate-pulse">
           <div className="h-16 bg-zinc-950/60 rounded-xl" />
           <div className="h-16 bg-zinc-950/60 rounded-xl" />
+        </div>
+      ) : isError ? (
+        <div className="flex-1 flex flex-col items-center justify-center py-6 px-3 text-center">
+          <div className="w-10 h-10 rounded-full bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400 mb-3">
+            <Mail className="w-5 h-5" />
+          </div>
+          <h4 className="text-xs font-semibold text-white mb-1">Gmail Scope Permission Required</h4>
+          <p className="text-[11px] text-zinc-400 max-w-[260px] mb-4 leading-relaxed">
+            Your Google authorization lacks the <span className="font-mono text-zinc-300">gmail.readonly</span> scope. Please reconnect and check the email permissions box.
+          </p>
+          <a
+            href="/api/auth/google/url"
+            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium transition-all shadow-lg shadow-indigo-600/20"
+          >
+            <span>Authorize Gmail</span>
+          </a>
         </div>
       ) : emails.length === 0 ? (
         <div className="flex-1 flex flex-col items-center justify-center py-10 text-center">

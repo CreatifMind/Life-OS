@@ -180,6 +180,7 @@ export default function DashboardPage() {
               emails={emails}
               isLoading={isSyncing && emails.length === 0}
               onConvertToTask={handleConvertToTask}
+              health={health?.gmail}
             />
           </div>
         </section>

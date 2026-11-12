@@ -55,6 +55,9 @@ export async function fetchRecentEmails(maxResults = 10): Promise<EmailThread[]>
     });
 
     const listData = await listRes.json();
+    if (listData.error) {
+      throw new Error(`Gmail API error (${listData.error.code}): ${listData.error.message}`);
+    }
     const messages = listData.messages || [];
 
     const threads: EmailThread[] = [];
@@ -101,6 +104,6 @@ export async function fetchRecentEmails(maxResults = 10): Promise<EmailThread[]>
     return threads;
   } catch (err: any) {
     console.error('Error fetching emails from Gmail:', err.message);
-    return [];
+    throw err;
   }
 }
