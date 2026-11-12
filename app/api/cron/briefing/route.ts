@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { fetchLiveCalendarEvents, fetchLiveReminders } from '@/lib/caldav';
-import { fetchRecentEmails } from '@/lib/gmail';
+import { fetchRecentEmails, sendBriefingEmail } from '@/lib/gmail';
 import { generateDailyBriefing } from '@/lib/gemini';
 import { saveBriefingToDb, logSyncAudit } from '@/lib/db';
 
@@ -34,12 +34,28 @@ export async function GET(req: NextRequest) {
     // 4. Persist to Supabase PostgreSQL
     await saveBriefingToDb(briefing);
 
-    // 5. Audit log
+    // 5. Dispatch automated 8:00 AM executive email briefing to user
+    const recipient = process.env.USER_EMAIL || process.env.APPLE_ID || 'chriswonglihong@gmail.com';
+    let emailDispatched = false;
+    let emailError: string | undefined;
+
+    try {
+      await sendBriefingEmail(briefing, recipient);
+      emailDispatched = true;
+      console.log(`[CRON] 8:00 AM briefing email successfully dispatched to ${recipient}`);
+    } catch (err: any) {
+      emailError = err.message;
+      console.warn('[CRON] Could not dispatch email (requires gmail.send permission):', err.message);
+    }
+
+    // 6. Audit log
     await logSyncAudit('CRON_DAILY_BRIEFING', true, {
       briefingId: briefing.id,
       eventsCount: events.length,
       remindersCount: reminders.length,
       emailsCount: emails.length,
+      emailDispatched,
+      emailError,
     });
 
     console.log('[CRON] 8:00 AM MYT Daily Briefing successfully generated and persisted.');
@@ -50,6 +66,8 @@ export async function GET(req: NextRequest) {
       briefingId: briefing.id,
       headline: briefing.headline,
       topPriorities: briefing.topPriorities,
+      emailDispatched,
+      emailError,
     });
   } catch (err: any) {
     console.error('[CRON ERROR]', err);
