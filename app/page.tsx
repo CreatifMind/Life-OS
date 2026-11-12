@@ -28,7 +28,7 @@ export default function DashboardPage() {
   const [modalNotes, setModalNotes] = useState('');
 
   // 1. Initial Load & Synchronization
-  const handleSync = useCallback(async () => {
+  const handleSyncData = useCallback(async () => {
     try {
       setIsSyncing(true);
       const res = await fetch('/api/sync');
@@ -66,10 +66,39 @@ export default function DashboardPage() {
     }
   }, []);
 
+  // 3. Unified Sync Button Action: Syncs all integrations AND regenerates AI Briefing together
+  const handleFullSync = useCallback(async () => {
+    setIsSyncing(true);
+    setIsBriefingLoading(true);
+    try {
+      const res = await fetch('/api/sync');
+      const json = await res.json();
+
+      if (json.success && json.data) {
+        setEvents(json.data.events || []);
+        setReminders(json.data.reminders || []);
+        setEmails(json.data.emails || []);
+        setHealth(json.data.health);
+        setLastSyncTime(json.data.health?.lastSync || new Date().toISOString());
+      }
+
+      const briefingRes = await fetch('/api/briefing/generate', { method: 'POST' });
+      const briefingJson = await briefingRes.json();
+      if (briefingJson.success && briefingJson.briefing) {
+        setBriefing(briefingJson.briefing);
+      }
+    } catch (err) {
+      console.error('Unified full sync failed:', err);
+    } finally {
+      setIsSyncing(false);
+      setIsBriefingLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
-    handleSync();
+    handleSyncData();
     handleFetchBriefing(false);
-  }, [handleSync, handleFetchBriefing]);
+  }, [handleSyncData, handleFetchBriefing]);
 
   // 3. Toggle Reminder State (Two-Way CalDAV Write-Back)
   const handleToggleTask = async (uid: string, nextStatus: boolean) => {
@@ -131,8 +160,8 @@ export default function DashboardPage() {
     <div className="min-h-screen flex flex-col bg-[#09090b] text-zinc-100">
       {/* Top Header */}
       <Header
-        onRefresh={handleSync}
-        isSyncing={isSyncing}
+        onRefresh={handleFullSync}
+        isSyncing={isSyncing || isBriefingLoading}
         health={health}
         lastSyncTime={lastSyncTime}
       />
