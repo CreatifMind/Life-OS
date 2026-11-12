@@ -65,7 +65,9 @@ export async function generateDailyBriefing(
   reminders: ReminderTask[],
   emails: EmailThread[]
 ): Promise<DailyBriefing> {
-  const currentDateMYT = new Date().toLocaleDateString('en-MY', {
+  const now = new Date();
+
+  const currentDateMYT = now.toLocaleDateString('en-MY', {
     timeZone: APP_TIMEZONE,
     weekday: 'long',
     year: 'numeric',
@@ -73,9 +75,9 @@ export async function generateDailyBriefing(
     day: 'numeric',
   });
 
-  const currentTimeMYT = new Date().toLocaleTimeString('en-MY', {
+  const currentTimeMYT = now.toLocaleTimeString('en-MY', {
     timeZone: APP_TIMEZONE,
-    hour: '2-digit',
+    hour: 'numeric',
     minute: '2-digit',
     hour12: true,
   });
@@ -91,29 +93,102 @@ export async function generateDailyBriefing(
     );
   });
 
-  // Filter out ancient past events (keep events from start of today onwards)
-  const now = new Date();
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  // Calculate start of today in APP_TIMEZONE
+  // Keep events from start of today onwards
+  const todayStr = new Intl.DateTimeFormat('en-CA', {
+    timeZone: APP_TIMEZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(now); // "YYYY-MM-DD"
+
   const activeEvents = events.filter(e => {
-    const eventEnd = new Date(e.endTime || e.startTime).getTime();
-    return eventEnd >= startOfToday;
+    const endIso = e.endTime || e.startTime;
+    const endStr = endIso.split('T')[0];
+    return endStr >= todayStr || new Date(endIso).getTime() >= now.getTime() - 24 * 60 * 60 * 1000;
+  });
+
+  // Format events with explicit 12-hour AM/PM and real-time temporal status
+  const formattedEvents = activeEvents.map(e => {
+    const startD = new Date(e.startTime);
+    const endD = new Date(e.endTime || e.startTime);
+    const isPast = endD.getTime() < now.getTime();
+    const isOngoing = startD.getTime() <= now.getTime() && endD.getTime() > now.getTime();
+
+    const dateStr = startD.toLocaleDateString('en-MY', {
+      timeZone: APP_TIMEZONE,
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+    });
+    const startTimeStr = startD.toLocaleTimeString('en-MY', {
+      timeZone: APP_TIMEZONE,
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+    });
+    const endTimeStr = endD.toLocaleTimeString('en-MY', {
+      timeZone: APP_TIMEZONE,
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+    });
+
+    if (e.isAllDay) {
+      const isMultiDay = endD.getTime() - startD.getTime() > 24 * 60 * 60 * 1000;
+      let status = '';
+      if (isPast) {
+        status = '[STATUS: PAST / COMPLETED]';
+      } else if (isOngoing) {
+        status = '[STATUS: ACTIVE TODAY (ALL DAY)]';
+      } else {
+        status = `[STATUS: UPCOMING ${isMultiDay ? 'MULTI-DAY' : 'ALL DAY'}]`;
+      }
+      return `- "${e.title}" [${e.calendarName}] ${status} on ${dateStr}${isMultiDay ? ` through ${endD.toLocaleDateString('en-MY', { timeZone: APP_TIMEZONE, month: 'short', day: 'numeric' })}` : ''}${e.location ? ` @ ${e.location}` : ''}`;
+    }
+
+    let status = '';
+    if (isPast) {
+      const hoursAgo = Math.max(0.1, (now.getTime() - endD.getTime()) / (1000 * 60 * 60)).toFixed(1);
+      status = `[STATUS: PAST / COMPLETED - ended ${hoursAgo} hours ago at ${endTimeStr}]`;
+    } else if (isOngoing) {
+      status = `[STATUS: IN PROGRESS NOW - ends at ${endTimeStr}]`;
+    } else {
+      const minutesUntil = Math.round((startD.getTime() - now.getTime()) / (1000 * 60));
+      if (minutesUntil <= 60) {
+        status = `[STATUS: IMMINENT - Starts in ${minutesUntil} minutes at ${startTimeStr}]`;
+      } else if (minutesUntil < 24 * 60) {
+        status = `[STATUS: UPCOMING TODAY - Starts at ${startTimeStr}]`;
+      } else {
+        status = `[STATUS: UPCOMING FUTURE - ${dateStr} at ${startTimeStr}]`;
+      }
+    }
+
+    return `- "${e.title}" [${e.calendarName}] ${status} (Scheduled: ${dateStr} from ${startTimeStr} to ${endTimeStr})${e.location ? ` @ ${e.location}` : ''}`;
   });
 
   const prompt = `
 You are the executive intelligence core of Life OS for user ${USER_NAME}.
-Today is ${currentDateMYT}, ${currentTimeMYT} (${APP_TIMEZONE}).
+Current real-world time: ${currentDateMYT}, ${currentTimeMYT} (${APP_TIMEZONE}).
 
 Generate an authoritative, razor-sharp Executive Daily Briefing using ONLY the real ground-truth data below.
-DO NOT hallucinate or invent unlisted meetings or obligations.
+DO NOT hallucinate or invent unlisted meetings, obligations, or times.
+
+CRITICAL TEMPORAL ACCURACY RULES:
+1. Ground every statement strictly against the current real-world time: ${currentDateMYT}, ${currentTimeMYT}.
+2. Past events are explicitly marked [STATUS: PAST / COMPLETED - ended X hours ago].
+   - NEVER generate warnings, urgent alerts, or "starting in X minutes" notifications for completed/past events.
+   - NEVER assign an event marked PAST / COMPLETED as a Top Priority to execute now.
+3. Attention / Warnings Banner ("warningsOrOverdue"):
+   - ONLY include real imminent events (starting in less than 60 minutes), overdue tasks, or urgent high-stakes unread emails.
+   - If all of today's calendar commitments have already ended and there are no overdue tasks or urgent emails, return an EMPTY ARRAY: "warningsOrOverdue": [].
+4. Top 3 Priorities:
+   - Rank only actionable items: upcoming events/meetings, active reminders/tasks, or priority emails requiring replies.
+   - If today has no remaining upcoming meetings, focus on tomorrow / upcoming multi-day commitments (e.g. Shanghai Fair), active reminders, or priority emails.
 
 ==================== GROUND TRUTH DATA ====================
-1. CALENDAR SCHEDULE (Current & Upcoming):
-${activeEvents.length === 0 ? '(No upcoming calendar events)' : activeEvents.map(e => {
-  const startD = new Date(e.startTime);
-  const endD = new Date(e.endTime);
-  const isMultiDay = endD.getTime() - startD.getTime() > 24 * 60 * 60 * 1000;
-  return `- "${e.title}" [${e.calendarName}] (${e.isAllDay ? (isMultiDay ? 'Multi-day from ' + e.startTime.split('T')[0] + ' to ' + e.endTime.split('T')[0] : 'All Day on ' + e.startTime.split('T')[0]) : e.startTime.split('T')[0] + ' from ' + e.startTime.split('T')[1].substring(0, 5) + ' to ' + e.endTime.split('T')[1].substring(0, 5)})${e.location ? ` @ ${e.location}` : ''}`;
-}).join('\n')}
+1. CALENDAR SCHEDULE:
+${formattedEvents.length === 0 ? '(No calendar events)' : formattedEvents.join('\n')}
 
 2. ACTIVE TO-DOS & REMINDERS:
 ${cleanReminders.length === 0 ? '(No open reminders)' : cleanReminders.map(r => `- [${r.isCompleted ? 'COMPLETED' : 'OPEN'}] "${r.title}" (List: ${r.listName}${r.dueDate ? `, Due: ${r.dueDate.split('T')[0]}` : ''})`).join('\n')}
@@ -124,12 +199,12 @@ ${emails.length === 0 ? '(No unread priority emails)' : emails.map(m => `- From:
 
 Respond strictly in valid JSON matching this schema:
 {
-  "headline": "A punchy, insightful 1-sentence executive summary tailored specifically to today's schedule and commitments",
+  "headline": "A punchy, insightful 1-sentence executive summary tailored specifically to current time, progress, and upcoming commitments",
   "topPriorities": [
     {
       "rank": 1,
-      "title": "Exact title of highest priority task/commitment for today",
-      "reason": "Why this matters most today (time-critical meeting, deadline, or immediate action)",
+      "title": "Exact title of highest priority upcoming item or action",
+      "reason": "Why this matters now",
       "source": "CALENDAR" | "REMINDER" | "GMAIL"
     },
     {
@@ -145,10 +220,10 @@ Respond strictly in valid JSON matching this schema:
       "source": "CALENDAR" | "REMINDER" | "GMAIL"
     }
   ],
-  "agendaSummary": "2-3 concise sentences detailing schedule flow, appointments, or open focus blocks.",
+  "agendaSummary": "2-3 concise sentences detailing schedule flow, note of completed daytime items if relevant, and open focus blocks tonight/tomorrow.",
   "emailHighlights": "2-3 concise sentences identifying urgent senders or emails needing replies.",
-  "warningsOrOverdue": ["List any overdue items, tight meeting intervals, or urgent follow-ups"],
-  "suggestedPreparation": "1 actionable sentence on what to prepare before starting the day."
+  "warningsOrOverdue": ["List any truly urgent items. If none, keep array empty []"],
+  "suggestedPreparation": "1 actionable sentence on what to prepare next."
 }
 `;
 
@@ -159,9 +234,9 @@ Respond strictly in valid JSON matching this schema:
 
     const briefing: DailyBriefing = {
       id: `briefing-${Date.now()}`,
-      briefingDate: new Date().toISOString().split('T')[0],
-      generatedAt: new Date().toISOString(),
-      headline: parsed.headline || `Good morning, ${USER_NAME}. Here is your operational briefing for ${currentDateMYT}.`,
+      briefingDate: todayStr,
+      generatedAt: now.toISOString(),
+      headline: parsed.headline || `Good evening, ${USER_NAME}. Here is your operational briefing for ${currentDateMYT}.`,
       topPriorities: (parsed.topPriorities || []).map((p: any, idx: number) => ({
         rank: p.rank || idx + 1,
         title: p.title || 'Focus Block',
@@ -173,56 +248,56 @@ Respond strictly in valid JSON matching this schema:
       warningsOrOverdue: parsed.warningsOrOverdue || [],
       suggestedPreparation: parsed.suggestedPreparation || 'Review upcoming events and proceed.',
       fullMarkdown: rawResponse,
-      lastSyncTimestamp: new Date().toISOString(),
+      lastSyncTimestamp: now.toISOString(),
     };
 
     return briefing;
   } catch (err: any) {
     console.warn('Gemini briefing generation fallback:', err.message);
-    const todayEvents = activeEvents.filter(e => e.startTime.startsWith(new Date().toISOString().split('T')[0]));
+    const upcomingEvents = activeEvents.filter(e => new Date(e.startTime).getTime() > now.getTime());
     return {
       id: `briefing-${Date.now()}`,
-      briefingDate: new Date().toISOString().split('T')[0],
-      generatedAt: new Date().toISOString(),
-      headline: `Good morning, ${USER_NAME}. You have ${todayEvents.length > 0 ? todayEvents[0].title : 'open focus time'} today and ${activeEvents.length} upcoming commitment(s).`,
+      briefingDate: todayStr,
+      generatedAt: now.toISOString(),
+      headline: `Good evening, ${USER_NAME}. You have ${upcomingEvents.length > 0 ? upcomingEvents[0].title : 'open focus time'} ahead and ${activeEvents.length} active commitment(s).`,
       topPriorities: [
-        ...(todayEvents.length > 0
+        ...(upcomingEvents.length > 0
           ? [{
               rank: 1,
-              title: todayEvents[0].title,
-              reason: `Scheduled event today at ${todayEvents[0].startTime.split('T')[1]?.substring(0, 5) || 'all-day'} in ${todayEvents[0].calendarName}`,
+              title: upcomingEvents[0].title,
+              reason: `Upcoming event in ${upcomingEvents[0].calendarName}`,
               source: 'CALENDAR' as const,
             }]
           : []),
         ...(cleanReminders.length > 0
           ? [{
-              rank: todayEvents.length > 0 ? 2 : 1,
+              rank: upcomingEvents.length > 0 ? 2 : 1,
               title: cleanReminders[0].title,
               reason: 'Active task in Apple Reminders',
               source: 'REMINDER' as const,
             }]
           : []),
-        ...(activeEvents.length > 1
+        ...(emails.length > 0
           ? [{
-              rank: 3,
-              title: activeEvents[1].title,
-              reason: `Upcoming event on ${activeEvents[1].startTime.split('T')[0]}`,
-              source: 'CALENDAR' as const,
+              rank: upcomingEvents.length > 0 ? (cleanReminders.length > 0 ? 3 : 2) : 1,
+              title: emails[0].subject,
+              reason: `Unread email from ${emails[0].senderName}`,
+              source: 'GMAIL' as const,
             }]
           : []),
       ],
-      agendaSummary: activeEvents.length > 0
-        ? `Upcoming: ${activeEvents.map(e => e.title).join(', ')}`
-        : 'Your schedule has open focus blocks for deep work today.',
+      agendaSummary: upcomingEvents.length > 0
+        ? `Upcoming commitments: ${upcomingEvents.map(e => e.title).join(', ')}`
+        : 'Your schedule for tonight is clear with open focus blocks.',
       emailHighlights: emails.length > 0
         ? `${emails.length} unread thread(s) in inbox.`
         : 'All priority inboxes are currently clear.',
       warningsOrOverdue: [],
-      suggestedPreparation: todayEvents.length > 0
-        ? `Prepare notes for ${todayEvents[0].title} before starting the day.`
-        : 'Review priority tasks and schedule deep work.',
+      suggestedPreparation: upcomingEvents.length > 0
+        ? `Prepare notes for ${upcomingEvents[0].title}.`
+        : 'Review priority tasks and prepare for tomorrow.',
       fullMarkdown: '',
-      lastSyncTimestamp: new Date().toISOString(),
+      lastSyncTimestamp: now.toISOString(),
     };
   }
 }
