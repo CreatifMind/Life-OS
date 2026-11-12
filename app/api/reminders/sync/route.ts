@@ -52,23 +52,37 @@ export async function POST(req: NextRequest) {
       const body = await req.json();
       if (Array.isArray(body)) {
         rawItems = body;
-      } else if (body && Array.isArray(body.reminders)) {
-        rawItems = body.reminders;
       } else if (body && typeof body === 'object') {
-        rawItems = [body];
+        // Find any array property (reminders, Reminders, tasks, Tasks, items, data, etc.)
+        const arrayProp = Object.values(body).find(v => Array.isArray(v));
+        if (arrayProp && Array.isArray(arrayProp)) {
+          rawItems = arrayProp;
+        } else {
+          rawItems = [body];
+        }
       }
     } else {
-      // Plain text fallback (one task per line)
+      // Plain text fallback (JSON string or one task per line)
       const text = await req.text();
-      const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
-      rawItems = lines.map(line => {
-        const parts = line.split('|').map(p => p.trim());
-        return {
-          title: parts[0],
-          dueDate: parts[1] || undefined,
-          listName: parts[2] || 'Reminders',
-        };
-      });
+      try {
+        const parsed = JSON.parse(text);
+        if (Array.isArray(parsed)) {
+          rawItems = parsed;
+        } else if (typeof parsed === 'object') {
+          const arr = Object.values(parsed).find(v => Array.isArray(v));
+          rawItems = Array.isArray(arr) ? arr : [parsed];
+        }
+      } catch {
+        const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+        rawItems = lines.map(line => {
+          const parts = line.split('|').map(p => p.trim());
+          return {
+            title: parts[0],
+            dueDate: parts[1] || undefined,
+            listName: parts[2] || 'Reminders',
+          };
+        });
+      }
     }
 
     if (!Array.isArray(rawItems)) {
@@ -78,7 +92,10 @@ export async function POST(req: NextRequest) {
     // Sanitize and normalize items into ReminderTask structure
     const sanitized: ReminderTask[] = rawItems
       .filter(item => {
-        const title = typeof item === 'string' ? item : item?.title || item?.name;
+        if (!item) return false;
+        const title = typeof item === 'string'
+          ? item
+          : item.title || item.Title || item.name || item.Name || item.summary || item.Summary;
         if (!title || typeof title !== 'string') return false;
         const lower = title.toLowerCase();
         return (
@@ -88,11 +105,17 @@ export async function POST(req: NextRequest) {
       })
       .map(item => {
         const isString = typeof item === 'string';
-        const title = isString ? item.trim() : (item.title || item.name || '').trim();
-        const listName = isString ? 'Reminders' : (item.listName || item.list || 'Reminders').trim();
-        const rawDue = isString ? undefined : (item.dueDate || item.due_date || item.due || item.deadline);
-        let dueDate: string | undefined;
+        const title = isString
+          ? item.trim()
+          : (item.title || item.Title || item.name || item.Name || item.summary || item.Summary || '').trim();
+        const listName = isString
+          ? 'Reminders'
+          : (item.listName || item.list || item.List || item['List Name'] || 'Reminders').trim();
+        const rawDue = isString
+          ? undefined
+          : (item.dueDate || item.due_date || item['Due Date'] || item.Due || item.due || item.deadline);
 
+        let dueDate: string | undefined;
         if (rawDue) {
           try {
             const d = new Date(rawDue);
@@ -104,23 +127,23 @@ export async function POST(req: NextRequest) {
           }
         }
 
-        const rawPrio = isString ? 0 : (item.priority ?? 0);
+        const rawPrio = isString ? 0 : (item.priority ?? item.Priority ?? 0);
         let priority: 0 | 1 | 5 | 9 = 0;
         if (rawPrio === 1 || rawPrio === '1' || rawPrio === 'high' || rawPrio === 'HIGH') priority = 1;
         else if (rawPrio === 5 || rawPrio === '5') priority = 5;
         else if (rawPrio === 9 || rawPrio === '9') priority = 9;
 
-        const uid = item.id || item.uid || generateTaskUid(title, listName);
+        const uid = (!isString && (item.id || item.uid || item.UID)) || generateTaskUid(title, listName);
 
         return {
           id: uid,
           uid,
           title,
           listName,
-          isCompleted: Boolean(item.isCompleted || item.completed),
+          isCompleted: Boolean(!isString && (item.isCompleted || item.completed || item['Is Completed'] || item.Completed)),
           priority,
           dueDate,
-          notes: item.notes || item.description || undefined,
+          notes: !isString ? (item.notes || item.Notes || item.description || item.Description || undefined) : undefined,
         };
       });
 
