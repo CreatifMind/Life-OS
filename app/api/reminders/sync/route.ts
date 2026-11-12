@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { saveSyncedReminders, getSyncedReminders } from '@/lib/db';
 import { ReminderTask } from '@/lib/types';
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 export const maxDuration = 30;
 
 function generateTaskUid(title: string, listName: string): string {
