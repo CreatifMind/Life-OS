@@ -118,10 +118,31 @@ export function RemindersWidget({
                 {completedReminders.map(task => (
                   <div
                     key={task.id}
-                    className="flex items-center gap-2.5 p-2 rounded-lg bg-zinc-950/40 text-zinc-500 text-xs"
+                    className="group flex items-center justify-between gap-2.5 p-2 rounded-lg bg-zinc-950/40 text-zinc-400 text-xs hover:bg-zinc-950/70 transition-colors"
                   >
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500/70" />
-                    <span className="line-through">{task.title}</span>
+                    <div className="flex items-center gap-2 min-w-0">
+                      <button
+                        onClick={() => handleToggle(task.uid, task.isCompleted)}
+                        disabled={togglingId === task.uid}
+                        className="text-emerald-500/70 hover:text-amber-400 transition-colors shrink-0 disabled:opacity-50"
+                        title="Click to mark incomplete / undo"
+                      >
+                        {togglingId === task.uid ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-400" />
+                        ) : (
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                        )}
+                      </button>
+                      <span className="line-through text-zinc-500 truncate">{task.title}</span>
+                    </div>
+
+                    <button
+                      onClick={() => handleToggle(task.uid, task.isCompleted)}
+                      disabled={togglingId === task.uid}
+                      className="text-[10px] text-zinc-500 hover:text-zinc-300 font-medium px-2 py-0.5 rounded bg-zinc-900 border border-zinc-800 transition-colors shrink-0"
+                    >
+                      Undo
+                    </button>
                   </div>
                 ))}
               </div>

@@ -12,10 +12,16 @@ function generateTaskUid(title: string, listName: string): string {
 export async function GET() {
   try {
     const reminders = await getSyncedReminders();
+    const openTasks = reminders.filter(r => !r.isCompleted);
+    const completedTasks = reminders.filter(r => r.isCompleted);
+
     return NextResponse.json({
       success: true,
       count: reminders.length,
+      openCount: openTasks.length,
+      completedCount: completedTasks.length,
       reminders,
+      completedTitles: completedTasks.map(t => t.title),
       instructions: {
         method: 'POST',
         endpoint: '/api/reminders/sync',
