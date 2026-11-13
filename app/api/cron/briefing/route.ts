@@ -40,7 +40,8 @@ export async function GET(req: NextRequest) {
     let emailError: string | undefined;
 
     try {
-      await sendBriefingEmail(briefing, recipient);
+      const openReminders = reminders.filter(r => !r.isCompleted);
+      await sendBriefingEmail(briefing, recipient, openReminders);
       emailDispatched = true;
       console.log(`[CRON] 8:00 AM briefing email successfully dispatched to ${recipient}`);
     } catch (err: any) {

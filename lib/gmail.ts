@@ -3,7 +3,7 @@
  * Handles OAuth refresh token rotation and fetches priority unread threads
  */
 
-import { EmailThread, DailyBriefing, ConnectedGmailAccount } from './types';
+import { EmailThread, DailyBriefing, ConnectedGmailAccount, ReminderTask } from './types';
 import { getAppSetting, saveAppSetting } from './db';
 
 const CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
@@ -268,18 +268,49 @@ export async function fetchRecentEmails(maxResults = 10): Promise<EmailThread[]>
   }
 }
 
-export async function sendBriefingEmail(briefing: DailyBriefing, recipientEmail: string): Promise<boolean> {
+function toBulletLines(text: string): string[] {
+  if (!text) return [];
+  const byNewline = text
+    .split('\n')
+    .map(l => l.replace(/^[\s•\-*]+/, '').trim())
+    .filter(Boolean);
+  if (byNewline.length > 1) return byNewline;
+  return text
+    .split(/(?<=[.!?])\s+/)
+    .map(l => l.replace(/^[\s•\-*]+/, '').trim())
+    .filter(Boolean);
+}
+
+export async function sendBriefingEmail(
+  briefing: DailyBriefing,
+  recipientEmail: string,
+  openReminders: ReminderTask[] = []
+): Promise<boolean> {
   const accessToken = await getFreshAccessToken();
 
   const formattedDate = new Date(briefing.generatedAt).toLocaleDateString('en-MY', {
     timeZone: 'Asia/Kuala_Lumpur',
-    weekday: 'long',
+    weekday: 'short',
     day: 'numeric',
-    month: 'long',
-    year: 'numeric',
+    month: 'short',
   });
 
-  const subject = `☕ Executive Daily Briefing — ${formattedDate}`;
+  const subject = `Life OS • ${formattedDate}`;
+  const scheduleBullets = toBulletLines(briefing.agendaSummary);
+  const focusText = briefing.suggestedPreparation || briefing.headline;
+
+  const taskBullets = openReminders.slice(0, 8).map(t => {
+    let dueLabel = '';
+    if (t.dueDate) {
+      const dueStr = new Date(t.dueDate).toLocaleDateString('en-MY', {
+        timeZone: 'Asia/Kuala_Lumpur',
+        day: 'numeric',
+        month: 'short',
+      });
+      dueLabel = ` <span style="color: #71717a;">(${dueStr})</span>`;
+    }
+    return `${t.title}${dueLabel}`;
+  });
 
   const htmlBody = `
 <!DOCTYPE html>
@@ -290,110 +321,52 @@ export async function sendBriefingEmail(briefing: DailyBriefing, recipientEmail:
   <title>${subject}</title>
 </head>
 <body style="margin: 0; padding: 0; background-color: #09090b; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #f4f4f5;">
-  <table width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color: #09090b; padding: 32px 16px;">
+  <table width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color: #09090b; padding: 24px 12px;">
     <tr>
       <td align="center">
-        <table width="100%" border="0" cellspacing="0" cellpadding="0" style="max-width: 600px; background-color: #18181b; border: 1px solid #27272a; border-radius: 16px; overflow: hidden; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);">
-          
-          <!-- Header Bar -->
+        <table width="100%" border="0" cellspacing="0" cellpadding="0" style="max-width: 560px; background-color: #18181b; border: 1px solid #27272a; border-radius: 14px; overflow: hidden;">
           <tr>
-            <td style="padding: 28px 32px 20px 32px; border-bottom: 1px solid #27272a;">
+            <td style="padding: 18px 24px; border-bottom: 1px solid #27272a;">
               <table width="100%" border="0" cellspacing="0" cellpadding="0">
                 <tr>
                   <td>
-                    <span style="font-size: 11px; font-weight: 700; letter-spacing: 0.1em; color: #818cf8; text-transform: uppercase;">✦ LIFE OS EXECUTIVE BRIEFING</span>
-                    <h1 style="margin: 6px 0 0 0; font-size: 18px; font-weight: 600; color: #ffffff;">Operational Briefing</h1>
-                    <span style="font-size: 12px; color: #71717a;">${formattedDate} • 8:00 AM MYT</span>
+                    <span style="font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: #818cf8; text-transform: uppercase;">LIFE OS • ${formattedDate}</span>
                   </td>
-                  <td align="right" valign="top">
-                    <a href="https://life-os-xi-drab.vercel.app" style="display: inline-block; padding: 8px 14px; background-color: #4f46e5; color: #ffffff; text-decoration: none; font-size: 11px; font-weight: 600; border-radius: 8px;">Open Life OS →</a>
+                  <td align="right">
+                    <a href="https://life-os-xi-drab.vercel.app" style="display: inline-block; padding: 6px 12px; background-color: #4f46e5; color: #ffffff; text-decoration: none; font-size: 11px; font-weight: 600; border-radius: 6px;">Open →</a>
                   </td>
                 </tr>
               </table>
             </td>
           </tr>
 
-          <!-- Executive Headline -->
           <tr>
-            <td style="padding: 24px 32px; background: linear-gradient(180deg, rgba(79, 70, 229, 0.08) 0%, rgba(24, 24, 27, 0) 100%);">
-              <span style="font-size: 11px; font-weight: 600; color: #a1a1aa; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 8px;">Executive Summary</span>
-              <p style="margin: 0; font-size: 16px; line-height: 1.5; color: #f4f4f5; font-weight: 500;">
-                "${briefing.headline}"
-              </p>
-            </td>
-          </tr>
-
-          <!-- Top 3 Priorities -->
-          <tr>
-            <td style="padding: 0 32px 24px 32px;">
-              <span style="font-size: 11px; font-weight: 700; letter-spacing: 0.08em; color: #818cf8; text-transform: uppercase; display: block; margin-bottom: 12px;">Top 3 Priorities Today</span>
-              <table width="100%" border="0" cellspacing="0" cellpadding="0">
-                ${briefing.topPriorities.map(p => `
-                  <tr>
-                    <td style="padding: 12px; background-color: #09090b; border: 1px solid #27272a; border-radius: 10px;">
-                      <table width="100%" border="0" cellspacing="0" cellpadding="0">
-                        <tr>
-                          <td width="24" valign="top">
-                            <span style="display: inline-block; width: 20px; height: 20px; background-color: #27272a; color: #a1a1aa; text-align: center; line-height: 20px; border-radius: 50%; font-size: 11px; font-weight: 600;">${p.rank}</span>
-                          </td>
-                          <td style="padding-left: 10px;">
-                            <span style="font-size: 13px; font-weight: 600; color: #ffffff;">${p.title}</span>
-                            <span style="display: inline-block; margin-left: 6px; padding: 2px 6px; font-size: 9px; font-weight: 600; border-radius: 4px; background-color: #27272a; color: #818cf8; text-transform: uppercase;">${p.source}</span>
-                            <p style="margin: 4px 0 0 0; font-size: 11px; line-height: 1.4; color: #a1a1aa;">${p.reason}</p>
-                          </td>
-                        </tr>
-                      </table>
-                    </td>
-                  </tr>
-                  <tr><td height="8"></td></tr>
-                `).join('')}
-              </table>
-            </td>
-          </tr>
-
-          <!-- Schedule & Intelligence Grid -->
-          <tr>
-            <td style="padding: 0 32px 24px 32px;">
-              <table width="100%" border="0" cellspacing="0" cellpadding="0">
-                <tr>
-                  <!-- Schedule Flow -->
-                  <td width="48%" valign="top" style="padding: 14px; background-color: #09090b; border: 1px solid #27272a; border-radius: 10px;">
-                    <span style="font-size: 10px; font-weight: 700; color: #71717a; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 6px;">Today's Schedule</span>
-                    <p style="margin: 0; font-size: 11px; line-height: 1.5; color: #d4d4d8;">${briefing.agendaSummary}</p>
-                  </td>
-                  <td width="4%"></td>
-                  <!-- Email Intelligence -->
-                  <td width="48%" valign="top" style="padding: 14px; background-color: #09090b; border: 1px solid #27272a; border-radius: 10px;">
-                    <span style="font-size: 10px; font-weight: 700; color: #71717a; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 6px;">Inbox Intelligence</span>
-                    <p style="margin: 0; font-size: 11px; line-height: 1.5; color: #d4d4d8;">${briefing.emailHighlights}</p>
-                  </td>
-                </tr>
-              </table>
-            </td>
-          </tr>
-
-          ${briefing.suggestedPreparation ? `
-          <!-- Strategic Focus -->
-          <tr>
-            <td style="padding: 0 32px 24px 32px;">
-              <div style="padding: 12px 16px; background-color: rgba(79, 70, 229, 0.1); border: 1px solid rgba(79, 70, 229, 0.25); border-radius: 10px;">
-                <span style="font-size: 10px; font-weight: 700; color: #818cf8; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-bottom: 4px;">Strategic Focus</span>
-                <p style="margin: 0; font-size: 12px; line-height: 1.4; color: #e0e7ff;">${briefing.suggestedPreparation}</p>
+            <td style="padding: 20px 24px;">
+              <!-- Focus -->
+              <div style="margin-bottom: 18px; padding: 10px 14px; background-color: rgba(79, 70, 229, 0.12); border-left: 3px solid #818cf8; border-radius: 6px;">
+                <span style="font-size: 10px; font-weight: 700; color: #818cf8; text-transform: uppercase; letter-spacing: 0.06em;">Focus</span>
+                <p style="margin: 4px 0 0 0; font-size: 13px; color: #f4f4f5; font-weight: 500;">${focusText}</p>
               </div>
+
+              <!-- Priorities -->
+              <span style="font-size: 10px; font-weight: 700; color: #a1a1aa; text-transform: uppercase; letter-spacing: 0.06em;">Priorities</span>
+              <ul style="margin: 6px 0 18px 0; padding-left: 18px; font-size: 13px; line-height: 1.6; color: #e4e4e7;">
+                ${briefing.topPriorities.map(p => `<li style="margin-bottom: 4px;"><strong style="color: #ffffff;">${p.title}</strong> <span style="color: #a1a1aa;">— ${p.reason}</span></li>`).join('')}
+              </ul>
+
+              <!-- Important Tasks -->
+              <span style="font-size: 10px; font-weight: 700; color: #a1a1aa; text-transform: uppercase; letter-spacing: 0.06em;">Important Tasks</span>
+              <ul style="margin: 6px 0 18px 0; padding-left: 18px; font-size: 13px; line-height: 1.6; color: #e4e4e7;">
+                ${taskBullets.length > 0 ? taskBullets.map(t => `<li style="margin-bottom: 3px;">${t}</li>`).join('') : '<li style="color: #71717a;">No open tasks</li>'}
+              </ul>
+
+              <!-- Schedule -->
+              <span style="font-size: 10px; font-weight: 700; color: #a1a1aa; text-transform: uppercase; letter-spacing: 0.06em;">Schedule</span>
+              <ul style="margin: 6px 0 0 0; padding-left: 18px; font-size: 13px; line-height: 1.6; color: #e4e4e7;">
+                ${scheduleBullets.length > 0 ? scheduleBullets.map(s => `<li style="margin-bottom: 3px;">${s}</li>`).join('') : '<li style="color: #71717a;">No scheduled events</li>'}
+              </ul>
             </td>
           </tr>
-          ` : ''}
-
-          <!-- Footer -->
-          <tr>
-            <td style="padding: 20px 32px; border-top: 1px solid #27272a; text-align: center; background-color: #09090b;">
-              <p style="margin: 0 0 8px 0; font-size: 11px; color: #71717a;">
-                Life OS Executive Intelligence • Auto-dispatched at 8:00 AM MYT
-              </p>
-              <a href="https://life-os-xi-drab.vercel.app" style="font-size: 11px; color: #818cf8; text-decoration: none;">Launch Life OS Dashboard</a>
-            </td>
-          </tr>
-
         </table>
       </td>
     </tr>

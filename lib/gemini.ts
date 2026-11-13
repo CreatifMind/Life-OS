@@ -197,33 +197,33 @@ ${cleanReminders.length === 0 ? '(No open reminders)' : cleanReminders.map(r => 
 ${emails.length === 0 ? '(No unread priority emails)' : emails.map(m => `- From: "${m.senderName}" <${m.senderEmail}> | Subject: "${m.subject}" | Snippet: "${m.snippet}"`).join('\n')}
 ===========================================================
 
-Respond strictly in valid JSON matching this schema:
+Respond strictly in valid JSON matching this schema (BE ULTRA-CONCISE — zero filler words, short scannable phrases only):
 {
-  "headline": "A punchy, insightful 1-sentence executive summary tailored specifically to current time, progress, and upcoming commitments",
+  "headline": "Max 12 words summarizing today's main focus.",
   "topPriorities": [
     {
       "rank": 1,
-      "title": "Exact title of highest priority upcoming item or action",
-      "reason": "Why this matters now",
+      "title": "Short action/task title",
+      "reason": "Max 8 words (e.g. 'Due today — client deliverables')",
       "source": "CALENDAR" | "REMINDER" | "GMAIL"
     },
     {
       "rank": 2,
       "title": "Second priority title",
-      "reason": "Why it matters",
+      "reason": "Max 8 words",
       "source": "CALENDAR" | "REMINDER" | "GMAIL"
     },
     {
       "rank": 3,
       "title": "Third priority title",
-      "reason": "Why it matters",
+      "reason": "Max 8 words",
       "source": "CALENDAR" | "REMINDER" | "GMAIL"
     }
   ],
-  "agendaSummary": "2-3 concise sentences detailing schedule flow, note of completed daytime items if relevant, and open focus blocks tonight/tomorrow.",
-  "emailHighlights": "2-3 concise sentences identifying urgent senders or emails needing replies.",
-  "warningsOrOverdue": ["List any truly urgent items. If none, keep array empty []"],
-  "suggestedPreparation": "1 actionable sentence on what to prepare next."
+  "agendaSummary": "Up to 4 ultra-short bullet lines separated by \\n (e.g. '• 10:00 AM Team Sync\\n• Afternoon: Open focus block'). No paragraphs.",
+  "emailHighlights": "Up to 3 ultra-short bullet lines separated by \\n (e.g. '• Sender — action needed'). No paragraphs.",
+  "warningsOrOverdue": ["Short phrase for truly urgent/overdue items only. If none, return []"],
+  "suggestedPreparation": "1 short action phrase (max 12 words)."
 }
 `;
 
