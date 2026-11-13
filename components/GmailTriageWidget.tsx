@@ -9,7 +9,7 @@ interface GmailTriageWidgetProps {
   isLoading: boolean;
   onConvertToTask: (email: EmailThread) => void;
   onDisconnectAccount?: (email: string) => void;
-  health?: { status: string; message?: string; accounts?: string[] };
+  health?: { status: string; message?: string; accounts?: string[]; emailSendReady?: boolean };
 }
 
 export function GmailTriageWidget({
@@ -66,6 +66,20 @@ export function GmailTriageWidget({
               )}
             </span>
           ))}
+        </div>
+      )}
+
+      {health?.status === 'OK' && health?.emailSendReady === false && (
+        <div className="mb-3 px-3 py-2 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-between gap-2">
+          <span className="text-[11px] text-amber-300">
+            Daily 8 AM briefing email needs <span className="font-mono">gmail.send</span> permission.
+          </span>
+          <a
+            href="/api/auth/google/url"
+            className="shrink-0 px-2 py-1 rounded-md bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 text-[10px] font-semibold transition-colors"
+          >
+            Re-authorize
+          </a>
         </div>
       )}
 

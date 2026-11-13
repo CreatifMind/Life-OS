@@ -162,6 +162,19 @@ export async function getFreshAccessToken(refreshTokenOverride?: string): Promis
   return data.access_token;
 }
 
+export async function hasGmailSendScope(): Promise<boolean> {
+  try {
+    const accessToken = await getFreshAccessToken();
+    const res = await fetch(`https://www.googleapis.com/oauth2/v1/tokeninfo?access_token=${encodeURIComponent(accessToken)}`);
+    if (!res.ok) return false;
+    const info = await res.json();
+    const scopeStr = String(info.scope || '');
+    return scopeStr.includes('gmail.send');
+  } catch {
+    return false;
+  }
+}
+
 async function fetchEmailsForAccount(account: ConnectedGmailAccount, maxResults: number): Promise<EmailThread[]> {
   const accessToken = await getFreshAccessToken(account.refreshToken);
 

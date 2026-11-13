@@ -1,22 +1,24 @@
 import { NextResponse } from 'next/server';
 import { fetchLiveCalendarEvents, fetchLiveReminders } from '@/lib/caldav';
-import { fetchRecentEmails, getConnectedGoogleAccounts } from '@/lib/gmail';
+import { fetchRecentEmails, getConnectedGoogleAccounts, hasGmailSendScope } from '@/lib/gmail';
 
 export const maxDuration = 30;
 
 export async function GET() {
   try {
-    const [eventsResult, remindersResult, emailsResult, accountsResult] = await Promise.allSettled([
+    const [eventsResult, remindersResult, emailsResult, accountsResult, sendScopeResult] = await Promise.allSettled([
       fetchLiveCalendarEvents(),
       fetchLiveReminders(),
       fetchRecentEmails(10),
       getConnectedGoogleAccounts(),
+      hasGmailSendScope(),
     ]);
 
     const events = eventsResult.status === 'fulfilled' ? eventsResult.value : [];
     const reminders = remindersResult.status === 'fulfilled' ? remindersResult.value : [];
     const emails = emailsResult.status === 'fulfilled' ? emailsResult.value : [];
     const gmailAccounts = accountsResult.status === 'fulfilled' ? accountsResult.value.map(a => a.email) : [];
+    const emailSendReady = sendScopeResult.status === 'fulfilled' ? sendScopeResult.value : false;
 
     const health = {
       appleCalendar: {
@@ -31,6 +33,7 @@ export async function GET() {
         status: emailsResult.status === 'fulfilled' ? 'OK' : 'ERROR',
         message: emailsResult.status === 'rejected' ? emailsResult.reason?.message : undefined,
         accounts: gmailAccounts,
+        emailSendReady,
       },
       lastSync: new Date().toISOString(),
     };

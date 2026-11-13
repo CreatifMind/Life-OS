@@ -79,6 +79,6 @@ export interface DailyBriefing {
 export interface SyncHealthStatus {
   appleCalendar: { status: 'OK' | 'ERROR' | 'PENDING'; lastSync?: string; message?: string };
   appleReminders: { status: 'OK' | 'ERROR' | 'PENDING'; lastSync?: string; message?: string };
-  gmail: { status: 'OK' | 'ERROR' | 'PENDING'; lastSync?: string; message?: string; accounts?: string[] };
+  gmail: { status: 'OK' | 'ERROR' | 'PENDING'; lastSync?: string; message?: string; accounts?: string[]; emailSendReady?: boolean };
   aiEngine: { status: 'OK' | 'ERROR' | 'PENDING'; lastSync?: string; message?: string };
 }

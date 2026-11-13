@@ -1,6 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import fs from 'node:fs';
-import path from 'node:path';
 import { getAppSetting, saveAppSetting } from '@/lib/db';
 import { fetchGoogleAccountEmail, saveConnectedGoogleAccount } from '@/lib/gmail';
 
@@ -47,30 +45,10 @@ export async function GET(req: NextRequest) {
     // Save into multi-account store in Supabase (upserts by email without overwriting other accounts)
     await saveConnectedGoogleAccount(accountEmail, refreshToken);
 
-    // Keep legacy GOOGLE_REFRESH_TOKEN populated if empty or single-account
+    // Keep legacy GOOGLE_REFRESH_TOKEN populated if empty
     const existingLegacy = await getAppSetting('GOOGLE_REFRESH_TOKEN');
     if (!existingLegacy) {
-      process.env.GOOGLE_REFRESH_TOKEN = refreshToken;
       await saveAppSetting('GOOGLE_REFRESH_TOKEN', refreshToken);
-
-      try {
-        const envPath = path.resolve(process.cwd(), '.env.local');
-        if (fs.existsSync(envPath)) {
-          let envContent = fs.readFileSync(envPath, 'utf8');
-          if (envContent.includes('GOOGLE_REFRESH_TOKEN=')) {
-            envContent = envContent.replace(
-              /GOOGLE_REFRESH_TOKEN=.*/,
-              `GOOGLE_REFRESH_TOKEN="${refreshToken}"`
-            );
-          } else {
-            envContent += `\nGOOGLE_REFRESH_TOKEN="${refreshToken}"\n`;
-          }
-          fs.writeFileSync(envPath, envContent, 'utf8');
-          console.log('[AUTH] Successfully updated GOOGLE_REFRESH_TOKEN in .env.local');
-        }
-      } catch (fsErr) {
-        console.warn('Could not update .env.local automatically (normal in serverless):', fsErr);
-      }
     }
 
     const hasGmailScope = grantedScopes.includes('gmail.readonly');
