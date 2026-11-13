@@ -7,10 +7,9 @@ import { DailyBriefing } from '@/lib/types';
 interface DailyBriefingCardProps {
   briefing: DailyBriefing | null;
   isLoading: boolean;
-  onRegenerate: () => Promise<void>;
 }
 
-export function DailyBriefingCard({ briefing, isLoading, onRegenerate }: DailyBriefingCardProps) {
+export function DailyBriefingCard({ briefing, isLoading }: DailyBriefingCardProps) {
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
 
   const handleSpeak = () => {
@@ -71,6 +70,13 @@ export function DailyBriefingCard({ briefing, isLoading, onRegenerate }: DailyBr
         </div>
 
         <div className="flex items-center gap-2">
+          {isLoading && (
+            <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium bg-indigo-500/10 text-indigo-300 border border-indigo-500/20">
+              <RefreshCw className="w-3 h-3 animate-spin" />
+              <span>Updating...</span>
+            </span>
+          )}
+
           {/* Audio briefing readout */}
           <button
             onClick={handleSpeak}
@@ -83,17 +89,6 @@ export function DailyBriefingCard({ briefing, isLoading, onRegenerate }: DailyBr
           >
             <Volume2 className="w-3.5 h-3.5" />
             <span>{isPlayingAudio ? 'Speaking...' : 'Listen'}</span>
-          </button>
-
-          {/* Regenerate button */}
-          <button
-            onClick={onRegenerate}
-            disabled={isLoading}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-zinc-800/80 hover:bg-zinc-750 text-zinc-300 border border-zinc-700/60 transition-all disabled:opacity-50"
-            title="Re-synthesize briefing with Gemini AI"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin text-indigo-400' : ''}`} />
-            <span>{isLoading ? 'Synthesizing...' : 'Regenerate'}</span>
           </button>
         </div>
       </div>

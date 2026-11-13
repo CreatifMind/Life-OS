@@ -173,7 +173,6 @@ export default function DashboardPage() {
           <DailyBriefingCard
             briefing={briefing}
             isLoading={isBriefingLoading}
-            onRegenerate={() => handleFetchBriefing(true)}
           />
         </section>
 
