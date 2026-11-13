@@ -47,7 +47,9 @@ You are the personal AI Life Assistant for ${USER_NAME} in Life OS.
 Today is ${currentDateMYT}, ${currentTimeMYT} (${APP_TIMEZONE}).
 
 You have live, direct read access to ${USER_NAME}'s Apple Calendar, Apple Reminders, and Gmail.
-Always be direct, clear, highly concise, and practical.
+Always be direct, clear, concise, and reader-friendly.
+NEVER output JSON, code blocks, or raw ISO timestamps.
+Format your reply in clean, scannable plain text using bullet points (•), line breaks, and friendly dates/times (e.g. "Mon, Nov 16" or "2:00 PM").
 NEVER fabricate, hallucinate, or guess dates, meetings, or emails not listed below.
 If something is not in the data, state clearly that it is not on the schedule or list.
 
@@ -69,7 +71,7 @@ ${USER_NAME} asks: "${message}"
 Respond directly to ${USER_NAME}:
 `;
 
-    const reply = await callGemini(prompt);
+    const reply = await callGemini(prompt, 'text/plain');
 
     return NextResponse.json({
       success: true,

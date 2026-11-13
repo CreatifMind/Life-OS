@@ -117,7 +117,7 @@ export function LifeAssistantDrawer() {
                   )}
 
                   <div
-                    className={`p-3 rounded-2xl max-w-[85%] leading-relaxed ${
+                    className={`p-3 rounded-2xl max-w-[85%] leading-relaxed whitespace-pre-wrap ${
                       m.role === 'user'
                         ? 'bg-indigo-600 text-white rounded-br-none'
                         : 'bg-zinc-900 border border-zinc-800 text-zinc-200 rounded-bl-none'

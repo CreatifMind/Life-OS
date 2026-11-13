@@ -21,7 +21,10 @@ interface GeminiGenerateResponse {
 // Highly reliable high-availability models with generous free quotas
 const MODELS = ['gemini-3.1-flash-lite', 'gemini-3.5-flash-lite', 'gemini-3.8-flash'];
 
-export async function callGemini(prompt: string): Promise<string> {
+export async function callGemini(
+  prompt: string,
+  responseMimeType: 'application/json' | 'text/plain' = 'application/json'
+): Promise<string> {
   if (!GEMINI_API_KEY) {
     throw new Error('GEMINI_API_KEY is not configured in .env.local');
   }
@@ -39,7 +42,7 @@ export async function callGemini(prompt: string): Promise<string> {
           generationConfig: {
             temperature: 0.2,
             maxOutputTokens: 2048,
-            responseMimeType: 'application/json',
+            responseMimeType,
           },
         }),
       });
