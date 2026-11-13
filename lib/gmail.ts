@@ -178,7 +178,7 @@ export async function hasGmailSendScope(): Promise<boolean> {
 async function fetchEmailsForAccount(account: ConnectedGmailAccount, maxResults: number): Promise<EmailThread[]> {
   const accessToken = await getFreshAccessToken(account.refreshToken);
 
-  const query = encodeURIComponent('is:unread');
+  const query = encodeURIComponent('in:inbox category:primary is:unread');
   const listRes = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=${maxResults}&q=${query}`, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
