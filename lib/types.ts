@@ -26,6 +26,7 @@ export interface ReminderTask {
 export interface EmailThread {
   id: string;
   threadId: string;
+  accountEmail?: string;
   senderName: string;
   senderEmail: string;
   subject: string;
@@ -37,6 +38,12 @@ export interface EmailThread {
   isActionable?: boolean;
   extractedDeadline?: string;
   urgencyScore?: number; // 1 to 5
+}
+
+export interface ConnectedGmailAccount {
+  email: string;
+  refreshToken: string;
+  addedAt: string;
 }
 
 export interface ActionProposal {
@@ -72,6 +79,6 @@ export interface DailyBriefing {
 export interface SyncHealthStatus {
   appleCalendar: { status: 'OK' | 'ERROR' | 'PENDING'; lastSync?: string; message?: string };
   appleReminders: { status: 'OK' | 'ERROR' | 'PENDING'; lastSync?: string; message?: string };
-  gmail: { status: 'OK' | 'ERROR' | 'PENDING'; lastSync?: string; message?: string };
+  gmail: { status: 'OK' | 'ERROR' | 'PENDING'; lastSync?: string; message?: string; accounts?: string[] };
   aiEngine: { status: 'OK' | 'ERROR' | 'PENDING'; lastSync?: string; message?: string };
 }

@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import fs from 'node:fs';
 import path from 'node:path';
-import { saveAppSetting } from '@/lib/db';
+import { getAppSetting, saveAppSetting } from '@/lib/db';
+import { fetchGoogleAccountEmail, saveConnectedGoogleAccount } from '@/lib/gmail';
 
 export async function GET(req: NextRequest) {
   const code = req.nextUrl.searchParams.get('code');
@@ -41,35 +42,41 @@ export async function GET(req: NextRequest) {
 
     const refreshToken = data.refresh_token;
     const grantedScopes = data.scope || '';
+    const accountEmail = await fetchGoogleAccountEmail(data.access_token);
 
-    // Update in memory & database (for permanent persistence on Vercel)
-    process.env.GOOGLE_REFRESH_TOKEN = refreshToken;
-    await saveAppSetting('GOOGLE_REFRESH_TOKEN', refreshToken);
+    // Save into multi-account store in Supabase (upserts by email without overwriting other accounts)
+    await saveConnectedGoogleAccount(accountEmail, refreshToken);
 
-    // Persist to .env.local if running in local environment
-    try {
-      const envPath = path.resolve(process.cwd(), '.env.local');
-      if (fs.existsSync(envPath)) {
-        let envContent = fs.readFileSync(envPath, 'utf8');
-        if (envContent.includes('GOOGLE_REFRESH_TOKEN=')) {
-          envContent = envContent.replace(
-            /GOOGLE_REFRESH_TOKEN=.*/,
-            `GOOGLE_REFRESH_TOKEN="${refreshToken}"`
-          );
-        } else {
-          envContent += `\nGOOGLE_REFRESH_TOKEN="${refreshToken}"\n`;
+    // Keep legacy GOOGLE_REFRESH_TOKEN populated if empty or single-account
+    const existingLegacy = await getAppSetting('GOOGLE_REFRESH_TOKEN');
+    if (!existingLegacy) {
+      process.env.GOOGLE_REFRESH_TOKEN = refreshToken;
+      await saveAppSetting('GOOGLE_REFRESH_TOKEN', refreshToken);
+
+      try {
+        const envPath = path.resolve(process.cwd(), '.env.local');
+        if (fs.existsSync(envPath)) {
+          let envContent = fs.readFileSync(envPath, 'utf8');
+          if (envContent.includes('GOOGLE_REFRESH_TOKEN=')) {
+            envContent = envContent.replace(
+              /GOOGLE_REFRESH_TOKEN=.*/,
+              `GOOGLE_REFRESH_TOKEN="${refreshToken}"`
+            );
+          } else {
+            envContent += `\nGOOGLE_REFRESH_TOKEN="${refreshToken}"\n`;
+          }
+          fs.writeFileSync(envPath, envContent, 'utf8');
+          console.log('[AUTH] Successfully updated GOOGLE_REFRESH_TOKEN in .env.local');
         }
-        fs.writeFileSync(envPath, envContent, 'utf8');
-        console.log('[AUTH] Successfully updated GOOGLE_REFRESH_TOKEN in .env.local');
+      } catch (fsErr) {
+        console.warn('Could not update .env.local automatically (normal in serverless):', fsErr);
       }
-    } catch (fsErr) {
-      console.warn('Could not update .env.local automatically (normal in serverless):', fsErr);
     }
 
     const hasGmailScope = grantedScopes.includes('gmail.readonly');
 
     return NextResponse.redirect(
-      new URL(`/?auth=gmail_success&scopes=${encodeURIComponent(grantedScopes)}&hasGmail=${hasGmailScope}`, req.url)
+      new URL(`/?auth=gmail_success&account=${encodeURIComponent(accountEmail)}&scopes=${encodeURIComponent(grantedScopes)}&hasGmail=${hasGmailScope}`, req.url)
     );
   } catch (err: any) {
     console.error('Error exchanging Google authorization code:', err);

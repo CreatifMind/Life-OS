@@ -209,6 +209,18 @@ export default function DashboardPage() {
               emails={emails}
               isLoading={isSyncing && emails.length === 0}
               onConvertToTask={handleConvertToTask}
+              onDisconnectAccount={async (email) => {
+                try {
+                  await fetch('/api/gmail/accounts', {
+                    method: 'DELETE',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email }),
+                  });
+                  await handleFullSync();
+                } catch (err) {
+                  console.error('Failed to disconnect Gmail account:', err);
+                }
+              }}
               health={health?.gmail}
             />
           </div>

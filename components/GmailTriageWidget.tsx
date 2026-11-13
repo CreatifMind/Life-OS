@@ -1,32 +1,73 @@
 'use client';
 
 import React from 'react';
-import { Mail, ArrowUpRight, CheckSquare, Sparkles, Inbox } from 'lucide-react';
+import { Mail, CheckSquare, Inbox, Plus, X } from 'lucide-react';
 import { EmailThread } from '@/lib/types';
 
 interface GmailTriageWidgetProps {
   emails: EmailThread[];
   isLoading: boolean;
   onConvertToTask: (email: EmailThread) => void;
-  health?: { status: string; message?: string };
+  onDisconnectAccount?: (email: string) => void;
+  health?: { status: string; message?: string; accounts?: string[] };
 }
 
-export function GmailTriageWidget({ emails, isLoading, onConvertToTask, health }: GmailTriageWidgetProps) {
+export function GmailTriageWidget({
+  emails,
+  isLoading,
+  onConvertToTask,
+  onDisconnectAccount,
+  health,
+}: GmailTriageWidgetProps) {
   const isError = health?.status === 'ERROR';
+  const accounts = health?.accounts || [];
 
   return (
     <div className="rounded-2xl p-5 md:p-6 bg-zinc-900/60 border border-zinc-800/80 shadow-lg flex flex-col h-full">
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           <Mail className="w-4 h-4 text-red-400" />
           <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-300">
             Priority Gmail Triage
           </h3>
         </div>
-        <span className="text-[11px] text-zinc-500 font-mono">
-          {emails.length} UNREAD
-        </span>
+        <div className="flex items-center gap-2.5">
+          <a
+            href="/api/auth/google/url"
+            className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-zinc-800/90 hover:bg-zinc-700 border border-zinc-700/60 text-zinc-300 hover:text-white text-[10px] font-medium transition-colors"
+            title="Connect another Gmail account"
+          >
+            <Plus className="w-3 h-3" />
+            <span>Add Account</span>
+          </a>
+          <span className="text-[11px] text-zinc-500 font-mono">
+            {emails.length} UNREAD
+          </span>
+        </div>
       </div>
+
+      {accounts.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 mb-3">
+          {accounts.map(acc => (
+            <span
+              key={acc}
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-zinc-950/80 border border-zinc-800 text-[10px] text-zinc-400"
+            >
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400/80" />
+              <span className="truncate max-w-[160px]">{acc}</span>
+              {onDisconnectAccount && accounts.length > 1 && (
+                <button
+                  onClick={() => onDisconnectAccount(acc)}
+                  className="ml-0.5 text-zinc-500 hover:text-red-400 transition-colors"
+                  title={`Disconnect ${acc}`}
+                >
+                  <X className="w-2.5 h-2.5" />
+                </button>
+              )}
+            </span>
+          ))}
+        </div>
+      )}
 
       {isLoading ? (
         <div className="space-y-3 py-4 animate-pulse">
@@ -84,9 +125,16 @@ export function GmailTriageWidget({ emails, isLoading, onConvertToTask, health }
               </p>
 
               <div className="flex items-center justify-between gap-2 pt-2 border-t border-zinc-850">
-                <span className="text-[10px] text-zinc-600 truncate max-w-[140px]">
-                  {email.senderEmail}
-                </span>
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span className="text-[10px] text-zinc-600 truncate max-w-[130px]">
+                    {email.senderEmail}
+                  </span>
+                  {email.accountEmail && accounts.length > 1 && (
+                    <span className="px-1.5 py-0.5 rounded bg-indigo-500/10 border border-indigo-500/20 text-[9px] text-indigo-300 truncate max-w-[100px]">
+                      {email.accountEmail.split('@')[0]}
+                    </span>
+                  )}
+                </div>
 
                 <button
                   onClick={() => onConvertToTask(email)}
