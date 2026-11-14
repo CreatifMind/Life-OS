@@ -170,6 +170,48 @@ export async function generateDailyBriefing(
     return `- "${e.title}" [${e.calendarName}] ${status} (Scheduled: ${dateStr} from ${startTimeStr} to ${endTimeStr})${e.location ? ` @ ${e.location}` : ''}`;
   });
 
+  // Format reminders with explicit MYT date, 12-hour time, and real-time overdue status
+  const formattedReminders = cleanReminders.map(r => {
+    if (!r.dueDate) {
+      return `- [${r.isCompleted ? 'COMPLETED' : 'OPEN'}] "${r.title}" (List: ${r.listName}, No due time)`;
+    }
+    const dueD = new Date(r.dueDate);
+    if (isNaN(dueD.getTime())) {
+      return `- [${r.isCompleted ? 'COMPLETED' : 'OPEN'}] "${r.title}" (List: ${r.listName})`;
+    }
+    const dueDateKey = new Intl.DateTimeFormat('en-CA', {
+      timeZone: APP_TIMEZONE,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(dueD);
+    const dueDateStr = dueD.toLocaleDateString('en-MY', {
+      timeZone: APP_TIMEZONE,
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+    });
+    const dueTimeStr = dueD.toLocaleTimeString('en-MY', {
+      timeZone: APP_TIMEZONE,
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+    });
+
+    let statusTag = '';
+    if (r.isCompleted) {
+      statusTag = '[STATUS: COMPLETED]';
+    } else if (dueD.getTime() < now.getTime()) {
+      statusTag = `[STATUS: OVERDUE - was due ${dueDateStr} at ${dueTimeStr}]`;
+    } else if (dueDateKey === todayStr) {
+      statusTag = `[STATUS: DUE TODAY at ${dueTimeStr} - NOT OVERDUE YET]`;
+    } else {
+      statusTag = `[STATUS: UPCOMING - Due ${dueDateStr} at ${dueTimeStr}]`;
+    }
+
+    return `- "${r.title}" (List: ${r.listName}) ${statusTag}`;
+  });
+
   const prompt = `
 You are the executive intelligence core of Life OS for user ${USER_NAME}.
 Current real-world time: ${currentDateMYT}, ${currentTimeMYT} (${APP_TIMEZONE}).
@@ -183,8 +225,9 @@ CRITICAL TEMPORAL ACCURACY RULES:
    - NEVER generate warnings, urgent alerts, or "starting in X minutes" notifications for completed/past events.
    - NEVER assign an event marked PAST / COMPLETED as a Top Priority to execute now.
 3. Attention / Warnings Banner ("warningsOrOverdue"):
-   - ONLY include real imminent events (starting in less than 60 minutes), overdue tasks, or urgent high-stakes unread emails.
-   - If all of today's calendar commitments have already ended and there are no overdue tasks or urgent emails, return an EMPTY ARRAY: "warningsOrOverdue": [].
+   - ONLY include real imminent events (starting in less than 60 minutes), reminders explicitly tagged [STATUS: OVERDUE ...], or urgent high-stakes unread emails.
+   - NEVER mark a reminder as overdue if it is tagged [STATUS: DUE TODAY at ... - NOT OVERDUE YET] or [STATUS: UPCOMING ...].
+   - If there are no overdue tasks, imminent events, or urgent emails, return an EMPTY ARRAY: "warningsOrOverdue": [].
 4. Top 3 Priorities:
    - Rank only actionable items: upcoming events/meetings, active reminders/tasks, or priority emails requiring replies.
    - If today has no remaining upcoming meetings, focus on tomorrow / upcoming multi-day commitments (e.g. Shanghai Fair), active reminders, or priority emails.
@@ -194,7 +237,7 @@ CRITICAL TEMPORAL ACCURACY RULES:
 ${formattedEvents.length === 0 ? '(No calendar events)' : formattedEvents.join('\n')}
 
 2. ACTIVE TO-DOS & REMINDERS:
-${cleanReminders.length === 0 ? '(No open reminders)' : cleanReminders.map(r => `- [${r.isCompleted ? 'COMPLETED' : 'OPEN'}] "${r.title}" (List: ${r.listName}${r.dueDate ? `, Due: ${r.dueDate.split('T')[0]}` : ''})`).join('\n')}
+${formattedReminders.length === 0 ? '(No open reminders)' : formattedReminders.join('\n')}
 
 3. PRIORITY EMAILS:
 ${emails.length === 0 ? '(No unread priority emails)' : emails.map(m => `- From: "${m.senderName}" <${m.senderEmail}> | Subject: "${m.subject}" | Snippet: "${m.snippet}"`).join('\n')}
