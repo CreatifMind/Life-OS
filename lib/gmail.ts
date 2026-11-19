@@ -175,6 +175,214 @@ export async function hasGmailSendScope(): Promise<boolean> {
   }
 }
 
+function stripAccountPrefix(id: string): { cleanId: string; inferredAccount?: string } {
+  const idx = id.indexOf(':');
+  if (idx > 0 && id.slice(0, idx).includes('@')) {
+    return { cleanId: id.slice(idx + 1), inferredAccount: id.slice(0, idx) };
+  }
+  return { cleanId: id };
+}
+
+async function getAccessTokenForAccount(accountEmail?: string): Promise<{ accessToken: string; email: string }> {
+  const accounts = await getConnectedGoogleAccounts();
+  if (accounts.length === 0) {
+    const token = await getFreshAccessToken();
+    return { accessToken: token, email: accountEmail || 'Primary' };
+  }
+  const target = accountEmail
+    ? accounts.find(a => a.email.toLowerCase() === accountEmail.toLowerCase()) || accounts[0]
+    : accounts[0];
+  const accessToken = await getFreshAccessToken(target.refreshToken);
+  return { accessToken, email: target.email };
+}
+
+function decodeBase64Url(data?: string): string {
+  if (!data) return '';
+  const normalized = data.replace(/-/g, '+').replace(/_/g, '/');
+  return Buffer.from(normalized, 'base64').toString('utf8');
+}
+
+function htmlToPlainText(html: string): string {
+  return html
+    .replace(/<style[\s\S]*?<\/style>/gi, '')
+    .replace(/<script[\s\S]*?<\/script>/gi, '')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|div|li|tr|h[1-6])>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function extractBodyFromPayload(payload: any): string {
+  if (!payload) return '';
+
+  if (payload.mimeType === 'text/plain' && payload.body?.data) {
+    return decodeBase64Url(payload.body.data).trim();
+  }
+
+  if (Array.isArray(payload.parts)) {
+    // Prefer text/plain first
+    for (const part of payload.parts) {
+      if (part.mimeType === 'text/plain' && part.body?.data) {
+        return decodeBase64Url(part.body.data).trim();
+      }
+      if (part.parts) {
+        const nested = extractBodyFromPayload(part);
+        if (nested) return nested;
+      }
+    }
+    // Fallback to text/html
+    for (const part of payload.parts) {
+      if (part.mimeType === 'text/html' && part.body?.data) {
+        return htmlToPlainText(decodeBase64Url(part.body.data));
+      }
+    }
+  }
+
+  if (payload.mimeType === 'text/html' && payload.body?.data) {
+    return htmlToPlainText(decodeBase64Url(payload.body.data));
+  }
+
+  if (payload.body?.data) {
+    return decodeBase64Url(payload.body.data).trim();
+  }
+
+  return '';
+}
+
+export interface EmailDetail {
+  id: string;
+  threadId: string;
+  accountEmail: string;
+  subject: string;
+  senderName: string;
+  senderEmail: string;
+  to: string;
+  date: string;
+  messageIdHeader?: string;
+  body: string;
+  snippet: string;
+}
+
+export async function fetchEmailDetail(rawId: string, accountEmail?: string): Promise<EmailDetail> {
+  const { cleanId, inferredAccount } = stripAccountPrefix(rawId);
+  const { accessToken, email } = await getAccessTokenForAccount(accountEmail || inferredAccount);
+
+  const res = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(cleanId)}?format=full`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+
+  const msg = await res.json();
+  if (msg.error) {
+    throw new Error(`Gmail fetch error (${msg.error.code}): ${msg.error.message}`);
+  }
+
+  const headers = msg.payload?.headers || [];
+  const getHeader = (name: string) =>
+    headers.find((h: any) => h.name.toLowerCase() === name.toLowerCase())?.value || '';
+
+  const from = getHeader('From') || 'Unknown';
+  let senderName = from;
+  let senderEmail = from;
+  const emailMatch = /<([^>]+)>/.exec(from);
+  if (emailMatch) {
+    senderEmail = emailMatch[1];
+    senderName = from.replace(emailMatch[0], '').trim().replace(/^"|"$/g, '');
+  }
+
+  const body = extractBodyFromPayload(msg.payload) || msg.snippet || '(Empty message)';
+
+  return {
+    id: rawId,
+    threadId: msg.threadId || cleanId,
+    accountEmail: email,
+    subject: getHeader('Subject') || '(No Subject)',
+    senderName: senderName || senderEmail,
+    senderEmail,
+    to: getHeader('To'),
+    date: getHeader('Date') || new Date().toISOString(),
+    messageIdHeader: getHeader('Message-ID') || undefined,
+    body,
+    snippet: msg.snippet || '',
+  };
+}
+
+export async function modifyEmailLabels(
+  rawId: string,
+  accountEmail: string | undefined,
+  removeLabelIds: string[]
+): Promise<boolean> {
+  const { cleanId, inferredAccount } = stripAccountPrefix(rawId);
+  const { accessToken } = await getAccessTokenForAccount(accountEmail || inferredAccount);
+
+  const res = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(cleanId)}/modify`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ removeLabelIds }),
+  });
+
+  const data = await res.json();
+  if (data.error) {
+    throw new Error(`Gmail modify error (${data.error.code}): ${data.error.message}`);
+  }
+  return true;
+}
+
+export async function replyToEmail(params: {
+  threadId: string;
+  to: string;
+  subject: string;
+  body: string;
+  inReplyTo?: string;
+  accountEmail?: string;
+}): Promise<boolean> {
+  const { accessToken } = await getAccessTokenForAccount(params.accountEmail);
+  const replySubject = /^re:/i.test(params.subject) ? params.subject : `Re: ${params.subject}`;
+
+  const lines = [
+    `To: ${params.to}`,
+    `Subject: =?utf-8?B?${Buffer.from(replySubject).toString('base64')}?=`,
+    ...(params.inReplyTo ? [`In-Reply-To: ${params.inReplyTo}`, `References: ${params.inReplyTo}`] : []),
+    'MIME-Version: 1.0',
+    'Content-Type: text/plain; charset=utf-8',
+    '',
+    params.body,
+  ];
+
+  const encodedMessage = Buffer.from(lines.join('\r\n'))
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+
+  const res = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      raw: encodedMessage,
+      threadId: params.threadId,
+    }),
+  });
+
+  const data = await res.json();
+  if (data.error) {
+    throw new Error(`Gmail reply error (${data.error.code}): ${data.error.message}`);
+  }
+  return true;
+}
+
 async function fetchEmailsForAccount(account: ConnectedGmailAccount, maxResults: number): Promise<EmailThread[]> {
   const accessToken = await getFreshAccessToken(account.refreshToken);
 

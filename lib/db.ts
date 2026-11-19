@@ -162,3 +162,54 @@ export async function updateSyncedReminderStatus(uid: string, isCompleted: boole
   );
   await saveSyncedReminders(updated);
 }
+
+export async function getPendingReminders(): Promise<any[]> {
+  const raw = await getAppSetting('PENDING_REMINDERS');
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function addPendingReminder(input: {
+  title: string;
+  listName?: string;
+  dueDate?: string;
+  notes?: string;
+}): Promise<any> {
+  const cleanTitle = input.title.trim();
+  const listName = (input.listName || 'Reminders').trim();
+  const uid = `lifeos-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+
+  const newTask = {
+    id: uid,
+    uid,
+    title: cleanTitle,
+    listName,
+    isCompleted: false,
+    priority: 0 as const,
+    dueDate: input.dueDate || undefined,
+    notes: input.notes?.trim() || undefined,
+  };
+
+  const pending = await getPendingReminders();
+  pending.push(newTask);
+  await saveAppSetting('PENDING_REMINDERS', JSON.stringify(pending));
+
+  const synced = await getSyncedReminders();
+  synced.unshift(newTask);
+  await saveSyncedReminders(synced);
+
+  return newTask;
+}
+
+export async function clearPendingReminders(uidsToRemove: string[]): Promise<void> {
+  if (!uidsToRemove || uidsToRemove.length === 0) return;
+  const removeSet = new Set(uidsToRemove);
+  const pending = await getPendingReminders();
+  const remaining = pending.filter(p => !removeSet.has(p.uid) && !removeSet.has(p.id));
+  await saveAppSetting('PENDING_REMINDERS', JSON.stringify(remaining));
+}

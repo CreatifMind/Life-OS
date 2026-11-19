@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { fetchLiveCalendarEvents, fetchLiveReminders } from '@/lib/caldav';
 import { fetchRecentEmails } from '@/lib/gmail';
 import { callGemini } from '@/lib/gemini';
+import { addPendingReminder } from '@/lib/db';
 
 export const maxDuration = 30;
 
@@ -50,6 +51,8 @@ You have live, direct read access to ${USER_NAME}'s Apple Calendar, Apple Remind
 Always be direct, clear, concise, and reader-friendly.
 NEVER output JSON, code blocks, or raw ISO timestamps.
 Format your reply in clean, scannable plain text using bullet points (•), line breaks, and friendly dates/times (e.g. "Mon, Nov 16" or "2:00 PM").
+If ${USER_NAME} explicitly asks you to create, add, or set a reminder/task, confirm it naturally AND append ONE hidden command line at the very end in this exact format:
+[[ADD_REMINDER|Exact Task Title|YYYY-MM-DDTHH:mm:ss+08:00 or empty|Optional notes or empty]]
 NEVER fabricate, hallucinate, or guess dates, meetings, or emails not listed below.
 If something is not in the data, state clearly that it is not on the schedule or list.
 
@@ -71,11 +74,30 @@ ${USER_NAME} asks: "${message}"
 Respond directly to ${USER_NAME}:
 `;
 
-    const reply = await callGemini(prompt, 'text/plain');
+    const rawReply = await callGemini(prompt, 'text/plain');
+    let reply = rawReply;
+    let createdReminder: any = null;
+
+    const addMatch = /\[\[ADD_REMINDER\|([^|\]]+)\|([^|\]]*)\|([^\]]*)\]\]/i.exec(rawReply);
+    if (addMatch) {
+      const title = addMatch[1].trim();
+      const rawDue = addMatch[2].trim();
+      const notes = addMatch[3].trim();
+      const dueDate = rawDue && !/^empty|none$/i.test(rawDue) ? rawDue : undefined;
+      if (title) {
+        createdReminder = await addPendingReminder({
+          title,
+          dueDate,
+          notes: notes && !/^empty|none$/i.test(notes) ? notes : undefined,
+        });
+      }
+      reply = rawReply.replace(addMatch[0], '').trim();
+    }
 
     return NextResponse.json({
       success: true,
       reply,
+      createdReminder,
     });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });

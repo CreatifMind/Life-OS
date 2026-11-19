@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
-import { createAppleReminder, markAppleReminderComplete, fetchLiveReminders } from '@/lib/caldav';
+import { markAppleReminderComplete, fetchLiveReminders } from '@/lib/caldav';
+import { addPendingReminder } from '@/lib/db';
 
 export async function GET() {
   try {
@@ -15,12 +16,18 @@ export async function POST(req: Request) {
     const body = await req.json();
     const { title, listName, dueDate, notes } = body;
 
-    if (!title) {
+    if (!title || !String(title).trim()) {
       return NextResponse.json({ success: false, error: 'Title is required' }, { status: 400 });
     }
 
-    const uid = await createAppleReminder(title, listName, dueDate, notes);
-    return NextResponse.json({ success: true, uid });
+    const task = await addPendingReminder({
+      title: String(title),
+      listName: listName ? String(listName) : 'Reminders',
+      dueDate: dueDate ? String(dueDate) : undefined,
+      notes: notes ? String(notes) : undefined,
+    });
+
+    return NextResponse.json({ success: true, uid: task.uid, task });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }

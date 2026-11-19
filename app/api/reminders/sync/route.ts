@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { saveSyncedReminders, getSyncedReminders } from '@/lib/db';
+import { saveSyncedReminders, getSyncedReminders, getPendingReminders, clearPendingReminders } from '@/lib/db';
 import { ReminderTask } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
@@ -13,7 +13,10 @@ function generateTaskUid(title: string, listName: string): string {
 
 export async function GET() {
   try {
-    const reminders = await getSyncedReminders();
+    const [reminders, pendingReminders] = await Promise.all([
+      getSyncedReminders(),
+      getPendingReminders(),
+    ]);
     const openTasks = reminders.filter(r => !r.isCompleted);
     const completedTasks = reminders.filter(r => r.isCompleted);
 
@@ -24,6 +27,7 @@ export async function GET() {
       completedCount: completedTasks.length,
       reminders,
       completedTitles: completedTasks.map(t => t.title),
+      pendingReminders,
       instructions: {
         method: 'POST',
         endpoint: '/api/reminders/sync',
@@ -47,16 +51,22 @@ export async function POST(req: NextRequest) {
   try {
     const contentType = req.headers.get('content-type') || '';
     let rawItems: any[] = [];
+    let createdPendingUids: string[] = [];
 
     if (contentType.includes('application/json')) {
       const body = await req.json();
       if (Array.isArray(body)) {
         rawItems = body;
       } else if (body && typeof body === 'object') {
-        // Find any array property (reminders, Reminders, tasks, Tasks, items, data, etc.)
-        const arrayProp = Object.values(body).find(v => Array.isArray(v));
-        if (arrayProp && Array.isArray(arrayProp)) {
-          rawItems = arrayProp;
+        if (Array.isArray(body.createdPendingUids)) {
+          createdPendingUids = body.createdPendingUids.filter((u: any) => typeof u === 'string');
+        }
+        // Find reminders array property (excluding createdPendingUids)
+        const arrayEntry = Object.entries(body).find(
+          ([k, v]) => k !== 'createdPendingUids' && Array.isArray(v)
+        );
+        if (arrayEntry && Array.isArray(arrayEntry[1])) {
+          rawItems = arrayEntry[1];
         } else {
           rawItems = [body];
         }
@@ -146,6 +156,21 @@ export async function POST(req: NextRequest) {
           notes: !isString ? (item.notes || item.Notes || item.description || item.Description || undefined) : undefined,
         };
       });
+
+    if (createdPendingUids.length > 0) {
+      await clearPendingReminders(createdPendingUids);
+    }
+
+    // Preserve any still-pending Life OS reminders not yet pushed to Apple Reminders
+    const remainingPending = await getPendingReminders();
+    const seenTitles = new Set(sanitized.map(r => r.title.toLowerCase().trim()));
+    for (const p of remainingPending) {
+      const key = String(p.title || '').toLowerCase().trim();
+      if (key && !seenTitles.has(key)) {
+        sanitized.unshift(p);
+        seenTitles.add(key);
+      }
+    }
 
     // Save to Supabase
     await saveSyncedReminders(sanitized);

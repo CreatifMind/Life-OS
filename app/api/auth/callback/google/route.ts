@@ -51,7 +51,7 @@ export async function GET(req: NextRequest) {
       await saveAppSetting('GOOGLE_REFRESH_TOKEN', refreshToken);
     }
 
-    const hasGmailScope = grantedScopes.includes('gmail.readonly');
+    const hasGmailScope = grantedScopes.includes('gmail.modify') || grantedScopes.includes('gmail.readonly');
 
     return NextResponse.redirect(
       new URL(`/?auth=gmail_success&account=${encodeURIComponent(accountEmail)}&scopes=${encodeURIComponent(grantedScopes)}&hasGmail=${hasGmailScope}`, req.url)

@@ -8,7 +8,11 @@ interface Message {
   text: string;
 }
 
-export function LifeAssistantDrawer() {
+interface LifeAssistantDrawerProps {
+  onReminderCreated?: () => void;
+}
+
+export function LifeAssistantDrawer({ onReminderCreated }: LifeAssistantDrawerProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<Message[]>([
@@ -53,6 +57,9 @@ export function LifeAssistantDrawer() {
       const data = await res.json();
       if (data.success && data.reply) {
         setMessages(prev => [...prev, { role: 'model', text: data.reply }]);
+        if (data.createdReminder) {
+          onReminderCreated?.();
+        }
       } else {
         setMessages(prev => [
           ...prev,
