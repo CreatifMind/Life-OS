@@ -191,28 +191,26 @@ export function CalendarTimeline({ events, isLoading }: CalendarTimelineProps) {
                   <div className="flex-1 h-px bg-zinc-800/60" />
                 </div>
 
-                {/* Events list for this day */}
-                <div className="space-y-2">
+                {/* Events list for this day (hairline rows) */}
+                <div className="divide-y divide-zinc-800/70">
                   {group.items.map(item => {
                     const event = item.originalEvent;
                     return (
                       <div
                         key={item.instanceId}
-                        className={`p-3.5 rounded-xl border transition-all ${
-                          isTodayGroup
-                            ? 'bg-gradient-to-r from-zinc-950 via-zinc-900/90 to-zinc-950 border-indigo-500/40 shadow-md shadow-indigo-500/5'
-                            : 'bg-zinc-950/70 border-zinc-800/80 hover:border-zinc-700'
+                        className={`py-3 px-2 -mx-2 rounded-lg transition-colors hover:bg-zinc-800/30 ${
+                          isTodayGroup ? 'border-l-2 border-l-indigo-500 pl-3 ml-0 rounded-l-none' : ''
                         }`}
                       >
-                        <div className="flex items-start justify-between gap-2 mb-1.5">
-                          <div className="flex items-center gap-2 flex-wrap">
+                        <div className="flex items-start justify-between gap-2 mb-1">
+                          <div className="flex items-center gap-2 flex-wrap min-w-0">
                             <h4 className="text-sm font-medium text-white tracking-tight leading-snug">
                               {event.title}
                             </h4>
                             {item.isMultiDay && (
-                              <span className="flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/40 uppercase tracking-wider">
+                              <span className="flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-300 border border-purple-500/30 uppercase tracking-wider">
                                 <Layers className="w-2.5 h-2.5" />
-                                Day {item.multiDayDayNumber} of {item.totalDays}
+                                Day {item.multiDayDayNumber}/{item.totalDays}
                               </span>
                             )}
                           </div>
@@ -227,7 +225,7 @@ export function CalendarTimeline({ events, isLoading }: CalendarTimelineProps) {
 
                         <div className="flex items-center gap-3 text-xs text-zinc-400 flex-wrap">
                           <div className="flex items-center gap-1 font-mono text-[11px]">
-                            <Clock className="w-3.5 h-3.5 text-zinc-500" />
+                            <Clock className="w-3 h-3 text-zinc-500" />
                             <span>
                               {event.isAllDay
                                 ? item.dateRangeLabel || 'All Day'

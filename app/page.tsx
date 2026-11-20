@@ -266,6 +266,7 @@ export default function DashboardPage() {
               reminders={reminders}
               isLoading={isSyncing && reminders.length === 0}
               onToggleTask={handleToggleTask}
+              onQuickAddTask={(title) => handleCreateTask(title)}
               onOpenNewTaskModal={() => {
                 setModalTitle('');
                 setModalNotes('');

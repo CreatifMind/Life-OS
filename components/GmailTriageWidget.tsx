@@ -119,14 +119,14 @@ export function GmailTriageWidget({
           </p>
         </div>
       ) : (
-        <div className="space-y-3 flex-1 overflow-y-auto max-h-[380px] pr-1">
+        <div className="divide-y divide-zinc-800/70 flex-1 overflow-y-auto max-h-[380px] pr-1">
           {emails.map(email => (
             <div
               key={email.id}
               onClick={() => onSelectEmail?.(email)}
-              className="p-3.5 rounded-xl bg-zinc-950/70 border border-zinc-800/80 hover:border-indigo-500/40 transition-all group cursor-pointer"
+              className="py-3 px-2 -mx-2 rounded-lg hover:bg-zinc-800/30 transition-colors group cursor-pointer"
             >
-              <div className="flex items-start justify-between gap-2 mb-1">
+              <div className="flex items-start justify-between gap-2 mb-0.5">
                 <span className="text-xs font-semibold text-white tracking-tight truncate max-w-[180px]">
                   {email.senderName}
                 </span>
@@ -135,15 +135,15 @@ export function GmailTriageWidget({
                 </span>
               </div>
 
-              <h4 className="text-xs font-medium text-zinc-300 mb-1 line-clamp-1">
+              <h4 className="text-xs font-medium text-zinc-300 mb-0.5 line-clamp-1">
                 {email.subject}
               </h4>
 
-              <p className="text-[11px] text-zinc-500 line-clamp-2 leading-relaxed mb-2.5">
+              <p className="text-[11px] text-zinc-500 line-clamp-2 leading-relaxed mb-2">
                 {email.snippet}
               </p>
 
-              <div className="flex items-center justify-between gap-2 pt-2 border-t border-zinc-850">
+              <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-1.5 min-w-0">
                   <span className="text-[10px] text-zinc-600 truncate max-w-[130px]">
                     {email.senderEmail}
