@@ -11,8 +11,26 @@ function generateTaskUid(title: string, listName: string): string {
   return `task-${clean}`;
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
+    const format = req.nextUrl.searchParams.get('format');
+    const claim = req.nextUrl.searchParams.get('claim') === '1';
+
+    if (format === 'lines') {
+      const pending = await getPendingReminders();
+      if (claim && pending.length > 0) {
+        await clearPendingReminders(pending.map(p => p.uid || p.id).filter(Boolean));
+      }
+      const lines = pending
+        .map(p => String(p.title || '').trim())
+        .filter(Boolean)
+        .join('\n');
+      return new NextResponse(lines, {
+        status: 200,
+        headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+      });
+    }
+
     const [reminders, pendingReminders] = await Promise.all([
       getSyncedReminders(),
       getPendingReminders(),
