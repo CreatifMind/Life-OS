@@ -251,6 +251,99 @@ export async function markAppleReminderComplete(taskUid: string, isCompleted: bo
   await updateSyncedReminderStatus(taskUid, isCompleted);
 }
 
+function toUtcIcsTimestamp(iso: string): string {
+  return new Date(iso).toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+}
+
+function toIcsDateOnly(iso: string): string {
+  const d = new Date(iso);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}${m}${day}`;
+}
+
+export async function createAppleCalendarEvent(input: {
+  title: string;
+  startTime: string;
+  endTime: string;
+  isAllDay?: boolean;
+  location?: string;
+  description?: string;
+  calendarName?: string;
+}): Promise<CalendarEvent> {
+  const { calendars } = await discoverCollections();
+  if (calendars.length === 0) {
+    throw new Error('No writable Apple Calendar found.');
+  }
+
+  const writableCalendars = calendars.filter(c => {
+    const lower = c.name.toLowerCase();
+    return !lower.includes('holiday') && !lower.includes('birthday') && !lower.includes('siri');
+  });
+  const pool = writableCalendars.length > 0 ? writableCalendars : calendars;
+
+  const targetCal =
+    (input.calendarName && pool.find(c => c.name.toLowerCase() === input.calendarName!.toLowerCase())) ||
+    pool.find(c => c.name.toLowerCase() === 'personal' || c.name.toLowerCase() === 'home' || c.name.toLowerCase() === 'work') ||
+    pool[0];
+
+  const uid = `lifeos-evt-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  const itemUrl = targetCal.url.endsWith('/') ? `${targetCal.url}${uid}.ics` : `${targetCal.url}/${uid}.ics`;
+  const dtstamp = toUtcIcsTimestamp(new Date().toISOString());
+
+  const escapeIcs = (str: string) =>
+    str.replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\n/g, '\\n');
+
+  let dtLines = '';
+  if (input.isAllDay) {
+    const startDate = toIcsDateOnly(input.startTime);
+    const endDateObj = new Date(input.endTime || input.startTime);
+    endDateObj.setDate(endDateObj.getDate() + 1); // DTEND is exclusive for all-day VEVENT
+    const endDate = toIcsDateOnly(endDateObj.toISOString());
+    dtLines = `DTSTART;VALUE=DATE:${startDate}\r\nDTEND;VALUE=DATE:${endDate}`;
+  } else {
+    dtLines = `DTSTART:${toUtcIcsTimestamp(input.startTime)}\r\nDTEND:${toUtcIcsTimestamp(input.endTime)}`;
+  }
+
+  const lines = [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//LifeOS//CalDAV//EN',
+    'BEGIN:VEVENT',
+    `UID:${uid}`,
+    `DTSTAMP:${dtstamp}`,
+    dtLines,
+    `SUMMARY:${escapeIcs(input.title.trim())}`,
+    ...(input.location?.trim() ? [`LOCATION:${escapeIcs(input.location.trim())}`] : []),
+    ...(input.description?.trim() ? [`DESCRIPTION:${escapeIcs(input.description.trim())}`] : []),
+    'END:VEVENT',
+    'END:VCALENDAR',
+  ];
+
+  const putRes = await davRequest(
+    itemUrl,
+    'PUT',
+    { 'Content-Type': 'text/calendar; charset=utf-8' },
+    lines.join('\r\n')
+  );
+
+  if (putRes.status >= 400) {
+    throw new Error(`Apple Calendar rejected event (HTTP ${putRes.status})`);
+  }
+
+  return {
+    id: uid,
+    title: input.title.trim(),
+    calendarName: targetCal.name,
+    startTime: new Date(input.startTime).toISOString(),
+    endTime: new Date(input.endTime).toISOString(),
+    isAllDay: Boolean(input.isAllDay),
+    location: input.location?.trim() || undefined,
+    description: input.description?.trim() || undefined,
+  };
+}
+
 const DEFAULT_TIMEZONE_OFFSET = process.env.TIMEZONE_OFFSET || '+08:00';
 
 function parseIcsDate(str: string): string {

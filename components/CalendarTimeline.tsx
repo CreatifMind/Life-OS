@@ -1,12 +1,13 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Calendar as CalendarIcon, Clock, MapPin, CalendarDays, Sparkles, Layers } from 'lucide-react';
+import { Calendar as CalendarIcon, Clock, MapPin, CalendarDays, Sparkles, Layers, Plus } from 'lucide-react';
 import { CalendarEvent } from '@/lib/types';
 
 interface CalendarTimelineProps {
   events: CalendarEvent[];
   isLoading: boolean;
+  onOpenNewEventModal?: () => void;
 }
 
 interface ExpandedTimelineItem {
@@ -20,7 +21,7 @@ interface ExpandedTimelineItem {
   dateRangeLabel?: string;
 }
 
-export function CalendarTimeline({ events, isLoading }: CalendarTimelineProps) {
+export function CalendarTimeline({ events, isLoading, onOpenNewEventModal }: CalendarTimelineProps) {
   const [showPast, setShowPast] = useState(false);
 
   const formatTime = (isoString: string) => {
@@ -145,6 +146,16 @@ export function CalendarTimeline({ events, isLoading }: CalendarTimelineProps) {
               Past ({pastItems.length})
             </button>
           </div>
+          {onOpenNewEventModal && (
+            <button
+              onClick={onOpenNewEventModal}
+              className="flex items-center gap-1 px-2 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-[11px] font-medium border border-zinc-700/60 transition-all active:scale-95"
+              title="Add event to Apple Calendar"
+            >
+              <Plus className="w-3 h-3" />
+              <span>Event</span>
+            </button>
+          )}
         </div>
       </div>
 

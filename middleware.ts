@@ -6,6 +6,12 @@ const PUBLIC_PATHS = [
   '/api/auth/login',
   '/api/reminders/sync',
   '/api/cron/briefing',
+  '/manifest.json',
+  '/sw.js',
+  '/icon.svg',
+  '/icon-192.png',
+  '/icon-512.png',
+  '/apple-touch-icon.png',
 ];
 
 export async function middleware(req: NextRequest) {

@@ -8,6 +8,7 @@ import { RemindersWidget } from '@/components/RemindersWidget';
 import { GmailTriageWidget } from '@/components/GmailTriageWidget';
 import { EmailDetailModal } from '@/components/EmailDetailModal';
 import { NewReminderModal } from '@/components/NewReminderModal';
+import { NewEventModal } from '@/components/NewEventModal';
 import { LifeAssistantDrawer } from '@/components/LifeAssistantDrawer';
 import { CalendarEvent, ReminderTask, EmailThread, DailyBriefing, SyncHealthStatus } from '@/lib/types';
 
@@ -29,6 +30,7 @@ export default function DashboardPage() {
 
   // Modal state
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isEventModalOpen, setIsEventModalOpen] = useState(false);
   const [modalTitle, setModalTitle] = useState('');
   const [modalNotes, setModalNotes] = useState('');
 
@@ -179,6 +181,33 @@ export default function DashboardPage() {
     }
   };
 
+  // Create New Apple Calendar Event via CalDAV
+  const handleCreateEvent = async (payload: {
+    title: string;
+    startTime: string;
+    endTime: string;
+    isAllDay: boolean;
+    location?: string;
+    calendarName?: string;
+  }) => {
+    const res = await fetch('/api/calendar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const json = await res.json();
+    if (!res.ok || !json.success) {
+      throw new Error(json.error || 'Failed to create event');
+    }
+    if (json.event) {
+      setEvents(prev =>
+        [...prev, json.event].sort(
+          (a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime()
+        )
+      );
+    }
+  };
+
   // Convert Email to Reminder Workflow
   const handleConvertToTask = (email: EmailThread) => {
     setModalTitle(`Follow up: ${email.subject}`);
@@ -257,7 +286,11 @@ export default function DashboardPage() {
         <section className="grid grid-cols-1 md:grid-cols-3 gap-5">
           {/* Column 1: Apple Calendar */}
           <div className={`h-full ${mobileTab === 'schedule' ? 'block' : 'hidden md:block'}`}>
-            <CalendarTimeline events={events} isLoading={isSyncing && events.length === 0} />
+            <CalendarTimeline
+              events={events}
+              isLoading={isSyncing && events.length === 0}
+              onOpenNewEventModal={() => setIsEventModalOpen(true)}
+            />
           </div>
 
           {/* Column 2: Apple Reminders */}
@@ -307,6 +340,20 @@ export default function DashboardPage() {
         onClose={() => setSelectedEmail(null)}
         onConvertToTask={handleConvertToTask}
         onEmailCleared={emailId => setEmails(prev => prev.filter(e => e.id !== emailId))}
+      />
+
+      {/* Quick Add Apple Calendar Event Modal */}
+      <NewEventModal
+        isOpen={isEventModalOpen}
+        onClose={() => setIsEventModalOpen(false)}
+        onSubmit={handleCreateEvent}
+        availableCalendars={Array.from(
+          new Set(
+            events
+              .map(e => e.calendarName)
+              .filter(c => c && !/holiday|birthday|siri/i.test(c))
+          )
+        )}
       />
 
       {/* Quick Add Apple Reminder Modal */}

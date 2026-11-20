@@ -57,7 +57,7 @@ export function LifeAssistantDrawer({ onReminderCreated }: LifeAssistantDrawerPr
       const data = await res.json();
       if (data.success && data.reply) {
         setMessages(prev => [...prev, { role: 'model', text: data.reply }]);
-        if (data.createdReminder) {
+        if (data.createdReminder || data.createdEvent) {
           onReminderCreated?.();
         }
       } else {

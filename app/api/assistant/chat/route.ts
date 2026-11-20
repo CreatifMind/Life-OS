@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { fetchLiveCalendarEvents, fetchLiveReminders } from '@/lib/caldav';
+import { fetchLiveCalendarEvents, fetchLiveReminders, createAppleCalendarEvent } from '@/lib/caldav';
 import { fetchRecentEmails } from '@/lib/gmail';
 import { callGemini } from '@/lib/gemini';
 import { addPendingReminder } from '@/lib/db';
@@ -53,6 +53,8 @@ NEVER output JSON, code blocks, or raw ISO timestamps.
 Format your reply in clean, scannable plain text using bullet points (•), line breaks, and friendly dates/times (e.g. "Mon, Nov 16" or "2:00 PM").
 If ${USER_NAME} explicitly asks you to create, add, or set a reminder/task, confirm it naturally AND append ONE hidden command line at the very end in this exact format:
 [[ADD_REMINDER|Exact Task Title|YYYY-MM-DDTHH:mm:ss+08:00 or empty|Optional notes or empty]]
+If ${USER_NAME} explicitly asks you to schedule, book, or add a calendar event/meeting, confirm it naturally AND append ONE hidden command line at the very end in this exact format:
+[[ADD_EVENT|Exact Event Title|YYYY-MM-DDTHH:mm:ss+08:00|YYYY-MM-DDTHH:mm:ss+08:00|Optional location or empty]]
 NEVER fabricate, hallucinate, or guess dates, meetings, or emails not listed below.
 If something is not in the data, state clearly that it is not on the schedule or list.
 
@@ -77,8 +79,9 @@ Respond directly to ${USER_NAME}:
     const rawReply = await callGemini(prompt, 'text/plain');
     let reply = rawReply;
     let createdReminder: any = null;
+    let createdEvent: any = null;
 
-    const addMatch = /\[\[ADD_REMINDER\|([^|\]]+)\|([^|\]]*)\|([^\]]*)\]\]/i.exec(rawReply);
+    const addMatch = /\[\[ADD_REMINDER\|([^|\]]+)\|([^|\]]*)\|([^\]]*)\]\]/i.exec(reply);
     if (addMatch) {
       const title = addMatch[1].trim();
       const rawDue = addMatch[2].trim();
@@ -91,13 +94,35 @@ Respond directly to ${USER_NAME}:
           notes: notes && !/^empty|none$/i.test(notes) ? notes : undefined,
         });
       }
-      reply = rawReply.replace(addMatch[0], '').trim();
+      reply = reply.replace(addMatch[0], '').trim();
+    }
+
+    const eventMatch = /\[\[ADD_EVENT\|([^|\]]+)\|([^|\]]+)\|([^|\]]+)\|([^\]]*)\]\]/i.exec(reply);
+    if (eventMatch) {
+      const title = eventMatch[1].trim();
+      const startTime = eventMatch[2].trim();
+      const endTime = eventMatch[3].trim();
+      const loc = eventMatch[4].trim();
+      if (title && startTime && endTime) {
+        try {
+          createdEvent = await createAppleCalendarEvent({
+            title,
+            startTime,
+            endTime,
+            location: loc && !/^empty|none$/i.test(loc) ? loc : undefined,
+          });
+        } catch (evtErr: any) {
+          console.error('Assistant failed to create calendar event:', evtErr.message);
+        }
+      }
+      reply = reply.replace(eventMatch[0], '').trim();
     }
 
     return NextResponse.json({
       success: true,
       reply,
       createdReminder,
+      createdEvent,
     });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
