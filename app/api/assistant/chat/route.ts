@@ -103,6 +103,7 @@ Respond directly to ${USER_NAME}:
       const startTime = eventMatch[2].trim();
       const endTime = eventMatch[3].trim();
       const loc = eventMatch[4].trim();
+      reply = reply.replace(eventMatch[0], '').trim();
       if (title && startTime && endTime) {
         try {
           createdEvent = await createAppleCalendarEvent({
@@ -113,9 +114,9 @@ Respond directly to ${USER_NAME}:
           });
         } catch (evtErr: any) {
           console.error('Assistant failed to create calendar event:', evtErr.message);
+          reply = `${reply}\n\n(Warning: Could not write to Apple Calendar — ${evtErr.message})`;
         }
       }
-      reply = reply.replace(eventMatch[0], '').trim();
     }
 
     return NextResponse.json({

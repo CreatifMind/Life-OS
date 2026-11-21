@@ -366,7 +366,26 @@ export default function DashboardPage() {
       />
 
       {/* Live Grounded AI Life Assistant */}
-      <LifeAssistantDrawer onReminderCreated={handleSyncData} />
+      <LifeAssistantDrawer
+        onReminderCreated={created => {
+          if (created) {
+            setReminders(prev => [created, ...prev]);
+          } else {
+            handleSyncData();
+          }
+        }}
+        onEventCreated={created => {
+          if (created) {
+            setEvents(prev =>
+              [...prev, created].sort(
+                (a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime()
+              )
+            );
+          } else {
+            handleSyncData();
+          }
+        }}
+      />
     </div>
   );
 }

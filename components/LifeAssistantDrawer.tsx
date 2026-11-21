@@ -3,16 +3,19 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Sparkles, X, Send, Bot, User, Loader2 } from 'lucide-react';
 
+import { CalendarEvent, ReminderTask } from '@/lib/types';
+
 interface Message {
   role: 'user' | 'model';
   text: string;
 }
 
 interface LifeAssistantDrawerProps {
-  onReminderCreated?: () => void;
+  onReminderCreated?: (reminder?: ReminderTask) => void;
+  onEventCreated?: (event?: CalendarEvent) => void;
 }
 
-export function LifeAssistantDrawer({ onReminderCreated }: LifeAssistantDrawerProps) {
+export function LifeAssistantDrawer({ onReminderCreated, onEventCreated }: LifeAssistantDrawerProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<Message[]>([
@@ -57,8 +60,11 @@ export function LifeAssistantDrawer({ onReminderCreated }: LifeAssistantDrawerPr
       const data = await res.json();
       if (data.success && data.reply) {
         setMessages(prev => [...prev, { role: 'model', text: data.reply }]);
-        if (data.createdReminder || data.createdEvent) {
-          onReminderCreated?.();
+        if (data.createdReminder) {
+          onReminderCreated?.(data.createdReminder);
+        }
+        if (data.createdEvent) {
+          onEventCreated?.(data.createdEvent);
         }
       } else {
         setMessages(prev => [
