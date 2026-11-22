@@ -12,7 +12,7 @@ interface Message {
 
 interface LifeAssistantDrawerProps {
   onReminderCreated?: (reminder?: ReminderTask) => void;
-  onEventCreated?: (event?: CalendarEvent) => void;
+  onEventCreated?: (event?: CalendarEvent, needsFullRefresh?: boolean) => void;
 }
 
 export function LifeAssistantDrawer({ onReminderCreated, onEventCreated }: LifeAssistantDrawerProps) {
@@ -63,8 +63,8 @@ export function LifeAssistantDrawer({ onReminderCreated, onEventCreated }: LifeA
         if (data.createdReminder) {
           onReminderCreated?.(data.createdReminder);
         }
-        if (data.createdEvent) {
-          onEventCreated?.(data.createdEvent);
+        if (data.createdEvent || data.mutatedCalendar) {
+          onEventCreated?.(data.createdEvent, Boolean(data.mutatedCalendar));
         }
       } else {
         setMessages(prev => [

@@ -253,7 +253,14 @@ export default function DashboardPage() {
         {(
           [
             { id: 'briefing', label: 'Briefing' },
-            { id: 'schedule', label: `Schedule (${events.length})` },
+            {
+              id: 'schedule',
+              label: `Schedule (${events.filter(e => {
+                const startOfToday = new Date();
+                startOfToday.setHours(0, 0, 0, 0);
+                return new Date(e.endTime || e.startTime).getTime() >= startOfToday.getTime();
+              }).length})`,
+            },
             { id: 'tasks', label: `Tasks (${reminders.filter(r => !r.isCompleted).length})` },
             { id: 'mail', label: `Mail (${emails.length})` },
           ] as Array<{ id: MobileTab; label: string }>
@@ -374,8 +381,10 @@ export default function DashboardPage() {
             handleSyncData();
           }
         }}
-        onEventCreated={created => {
-          if (created) {
+        onEventCreated={(created, needsFullRefresh) => {
+          if (needsFullRefresh) {
+            handleSyncData();
+          } else if (created) {
             setEvents(prev =>
               [...prev, created].sort(
                 (a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime()

@@ -283,8 +283,12 @@ export async function createAppleCalendarEvent(input: {
   });
   const pool = writableCalendars.length > 0 ? writableCalendars : calendars;
 
+  const isMeetingLike = /\b(meeting|call|sync|client|review|standup|interview|expo|fair)\b/i.test(input.title);
+  const preferredDefault = isMeetingLike ? 'work' : 'personal';
+
   const targetCal =
     (input.calendarName && pool.find(c => c.name.toLowerCase() === input.calendarName!.toLowerCase())) ||
+    pool.find(c => c.name.toLowerCase() === preferredDefault) ||
     pool.find(c => c.name.toLowerCase() === 'personal' || c.name.toLowerCase() === 'home' || c.name.toLowerCase() === 'work') ||
     pool[0];
 
@@ -342,6 +346,67 @@ export async function createAppleCalendarEvent(input: {
     location: input.location?.trim() || undefined,
     description: input.description?.trim() || undefined,
   };
+}
+
+export async function deleteAppleCalendarEventByTitle(
+  matchTitle: string,
+  daysPast = 14,
+  daysFuture = 60
+): Promise<{ deletedCount: number; deletedCalendar?: string }> {
+  const { calendars } = await discoverCollections();
+  const needle = matchTitle.trim().toLowerCase();
+  if (!needle) return { deletedCount: 0 };
+
+  const now = new Date();
+  const startRange = new Date(now.getTime() - daysPast * 24 * 60 * 60 * 1000).toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+  const endRange = new Date(now.getTime() + daysFuture * 24 * 60 * 60 * 1000).toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+
+  let deletedCount = 0;
+  let deletedCalendar: string | undefined;
+
+  for (const cal of calendars) {
+    const lowerCal = cal.name.toLowerCase();
+    if (lowerCal.includes('holiday') || lowerCal.includes('birthday') || lowerCal.includes('siri')) {
+      continue;
+    }
+
+    const reportBody = `<?xml version="1.0" encoding="utf-8" ?>
+<c:calendar-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
+  <d:prop><d:getetag /><c:calendar-data /></d:prop>
+  <c:filter>
+    <c:comp-filter name="VCALENDAR">
+      <c:comp-filter name="VEVENT">
+        <c:time-range start="${startRange}" end="${endRange}" />
+      </c:comp-filter>
+    </c:comp-filter>
+  </c:filter>
+</c:calendar-query>`;
+
+    const res = await davRequest(cal.url, 'REPORT', {
+      'Depth': '1',
+      'Content-Type': 'application/xml; charset=utf-8',
+    }, reportBody);
+
+    const responseBlocks = [...res.text.matchAll(/<response[\s\S]*?<\/response>/gi)];
+    for (const block of responseBlocks) {
+      const raw = block[0];
+      const hrefMatch = /<href[^>]*>(.*?)<\/href>/i.exec(raw);
+      const summaryMatch = /SUMMARY(?:;[^:]+)?:([^\r\n]+)/i.exec(raw);
+      if (!hrefMatch || !summaryMatch) continue;
+
+      const summary = summaryMatch[1].trim().toLowerCase();
+      if (summary === needle || summary.includes(needle) || needle.includes(summary)) {
+        const itemUrl = resolveUrl(cal.url, hrefMatch[1].trim());
+        const delRes = await davRequest(itemUrl, 'DELETE');
+        if (delRes.status < 400) {
+          deletedCount += 1;
+          deletedCalendar = cal.name;
+        }
+      }
+    }
+  }
+
+  return { deletedCount, deletedCalendar };
 }
 
 const DEFAULT_TIMEZONE_OFFSET = process.env.TIMEZONE_OFFSET || '+08:00';

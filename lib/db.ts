@@ -213,3 +213,30 @@ export async function clearPendingReminders(uidsToRemove: string[]): Promise<voi
   const remaining = pending.filter(p => !removeSet.has(p.uid) && !removeSet.has(p.id));
   await saveAppSetting('PENDING_REMINDERS', JSON.stringify(remaining));
 }
+
+const DEFAULT_ASSISTANT_RULES = [
+  'All meetings should be scheduled under the Work calendar by default.',
+];
+
+export async function getAssistantRules(): Promise<string[]> {
+  const raw = await getAppSetting('ASSISTANT_RULES');
+  if (!raw) return DEFAULT_ASSISTANT_RULES;
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      return parsed.filter((r: any) => typeof r === 'string' && r.trim().length > 0);
+    }
+  } catch {}
+  return DEFAULT_ASSISTANT_RULES;
+}
+
+export async function addAssistantRule(rule: string): Promise<string[]> {
+  const clean = rule.trim();
+  if (!clean) return getAssistantRules();
+  const rules = await getAssistantRules();
+  if (!rules.some(r => r.toLowerCase() === clean.toLowerCase())) {
+    rules.push(clean);
+    await saveAppSetting('ASSISTANT_RULES', JSON.stringify(rules));
+  }
+  return rules;
+}

@@ -1,8 +1,13 @@
 import { NextResponse } from 'next/server';
-import { fetchLiveCalendarEvents, fetchLiveReminders, createAppleCalendarEvent } from '@/lib/caldav';
+import {
+  fetchLiveCalendarEvents,
+  fetchLiveReminders,
+  createAppleCalendarEvent,
+  deleteAppleCalendarEventByTitle,
+} from '@/lib/caldav';
 import { fetchRecentEmails } from '@/lib/gmail';
 import { callGemini } from '@/lib/gemini';
-import { addPendingReminder } from '@/lib/db';
+import { addPendingReminder, getAssistantRules, addAssistantRule } from '@/lib/db';
 
 export const maxDuration = 30;
 
@@ -17,16 +22,18 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: false, error: 'Message cannot be empty' }, { status: 400 });
     }
 
-    // 1. Fetch live ground truth
-    const [eventsResult, remindersResult, emailsResult] = await Promise.allSettled([
+    // 1. Fetch live ground truth + persistent user rules
+    const [eventsResult, remindersResult, emailsResult, rulesResult] = await Promise.allSettled([
       fetchLiveCalendarEvents(14, 30),
       fetchLiveReminders(),
       fetchRecentEmails(10),
+      getAssistantRules(),
     ]);
 
     const events = eventsResult.status === 'fulfilled' ? eventsResult.value : [];
     const reminders = remindersResult.status === 'fulfilled' ? remindersResult.value : [];
     const emails = emailsResult.status === 'fulfilled' ? emailsResult.value : [];
+    const assistantRules = rulesResult.status === 'fulfilled' ? rulesResult.value : [];
 
     const currentDateMYT = new Date().toLocaleDateString('en-MY', {
       timeZone: APP_TIMEZONE,
@@ -53,10 +60,19 @@ NEVER output JSON, code blocks, or raw ISO timestamps.
 Format your reply in clean, scannable plain text using bullet points (•), line breaks, and friendly dates/times (e.g. "Mon, Nov 16" or "2:00 PM").
 If ${USER_NAME} explicitly asks you to create, add, or set a reminder/task, confirm it naturally AND append ONE hidden command line at the very end in this exact format:
 [[ADD_REMINDER|Exact Task Title|YYYY-MM-DDTHH:mm:ss+08:00 or empty|Optional notes or empty]]
-If ${USER_NAME} explicitly asks you to schedule, book, or add a calendar event/meeting, confirm it naturally AND append ONE hidden command line at the very end in this exact format:
-[[ADD_EVENT|Exact Event Title|YYYY-MM-DDTHH:mm:ss+08:00|YYYY-MM-DDTHH:mm:ss+08:00|Optional location or empty]]
+If ${USER_NAME} explicitly asks you to schedule, book, or add a NEW calendar event/meeting, confirm it naturally AND append ONE hidden command line at the very end in this exact format:
+[[ADD_EVENT|Exact Event Title|YYYY-MM-DDTHH:mm:ss+08:00|YYYY-MM-DDTHH:mm:ss+08:00|Calendar Name (Work or Personal)|Optional location or empty]]
+If ${USER_NAME} asks you to MOVE, RESCHEDULE, or RE-CATEGORIZE an EXISTING calendar event (e.g. change its time or move it from Personal to Work), confirm it naturally AND append ONE hidden command line (NEVER use ADD_EVENT for a move/update):
+[[MOVE_EVENT|Exact Existing Event Title|New Event Title|YYYY-MM-DDTHH:mm:ss+08:00|YYYY-MM-DDTHH:mm:ss+08:00|Calendar Name (Work or Personal)|Optional location or empty]]
+If ${USER_NAME} asks you to DELETE or CANCEL an existing calendar event, confirm it naturally AND append:
+[[DELETE_EVENT|Exact Existing Event Title]]
+If ${USER_NAME} states a permanent scheduling/workflow preference ("from now on...", "always..."), append:
+[[SAVE_RULE|Concise rule to remember permanently]]
 NEVER fabricate, hallucinate, or guess dates, meetings, or emails not listed below.
 If something is not in the data, state clearly that it is not on the schedule or list.
+
+=== PERSISTENT USER RULES & PREFERENCES (ALWAYS FOLLOW) ===
+${assistantRules.length === 0 ? '(None)' : assistantRules.map(r => `- ${r}`).join('\n')}
 
 Ground Truth Data:
 === CALENDAR EVENTS ===
@@ -80,7 +96,19 @@ Respond directly to ${USER_NAME}:
     let reply = rawReply;
     let createdReminder: any = null;
     let createdEvent: any = null;
+    let mutatedCalendar = false;
 
+    // 1. Save persistent rule if requested
+    const ruleMatch = /\[\[SAVE_RULE\|([^\]]+)\]\]/i.exec(reply);
+    if (ruleMatch) {
+      const ruleText = ruleMatch[1].trim();
+      reply = reply.replace(ruleMatch[0], '').trim();
+      if (ruleText) {
+        await addAssistantRule(ruleText);
+      }
+    }
+
+    // 2. Add Reminder
     const addMatch = /\[\[ADD_REMINDER\|([^|\]]+)\|([^|\]]*)\|([^\]]*)\]\]/i.exec(reply);
     if (addMatch) {
       const title = addMatch[1].trim();
@@ -97,12 +125,62 @@ Respond directly to ${USER_NAME}:
       reply = reply.replace(addMatch[0], '').trim();
     }
 
-    const eventMatch = /\[\[ADD_EVENT\|([^|\]]+)\|([^|\]]+)\|([^|\]]+)\|([^\]]*)\]\]/i.exec(reply);
+    // 3. Move / Update Existing Calendar Event (delete old + create updated)
+    const moveMatch = /\[\[MOVE_EVENT\|([^|\]]+)\|([^|\]]+)\|([^|\]]+)\|([^|\]]+)\|([^|\]]*)\|([^\]]*)\]\]/i.exec(reply);
+    if (moveMatch) {
+      const existingTitle = moveMatch[1].trim();
+      const newTitle = moveMatch[2].trim() || existingTitle;
+      const startTime = moveMatch[3].trim();
+      const endTime = moveMatch[4].trim();
+      const calName = moveMatch[5].trim();
+      const loc = moveMatch[6].trim();
+      reply = reply.replace(moveMatch[0], '').trim();
+      try {
+        const delResult = await deleteAppleCalendarEventByTitle(existingTitle);
+        createdEvent = await createAppleCalendarEvent({
+          title: newTitle,
+          startTime,
+          endTime,
+          calendarName: calName && !/^empty|none$/i.test(calName) ? calName : delResult.deletedCalendar,
+          location: loc && !/^empty|none$/i.test(loc) ? loc : undefined,
+        });
+        mutatedCalendar = true;
+        if (delResult.deletedCount === 0) {
+          reply = `${reply}\n\n(Note: Created the updated event, but could not find an old "${existingTitle}" copy to remove.)`;
+        }
+      } catch (evtErr: any) {
+        console.error('Assistant failed to move calendar event:', evtErr.message);
+        reply = `${reply}\n\n(Warning: Could not update Apple Calendar — ${evtErr.message})`;
+      }
+    }
+
+    // 4. Delete Existing Calendar Event
+    const deleteMatch = /\[\[DELETE_EVENT\|([^\]]+)\]\]/i.exec(reply);
+    if (deleteMatch) {
+      const targetTitle = deleteMatch[1].trim();
+      reply = reply.replace(deleteMatch[0], '').trim();
+      try {
+        const delResult = await deleteAppleCalendarEventByTitle(targetTitle);
+        mutatedCalendar = true;
+        if (delResult.deletedCount === 0) {
+          reply = `${reply}\n\n(Note: Could not find "${targetTitle}" in Apple Calendar to delete.)`;
+        }
+      } catch (evtErr: any) {
+        reply = `${reply}\n\n(Warning: Could not delete from Apple Calendar — ${evtErr.message})`;
+      }
+    }
+
+    // 5. Add New Calendar Event (supports optional 5th calendarName field)
+    const eventMatch = /\[\[ADD_EVENT\|([^|\]]+)\|([^|\]]+)\|([^|\]]+)\|([^|\]]*)(?:\|([^\]]*))?\]\]/i.exec(reply);
     if (eventMatch) {
       const title = eventMatch[1].trim();
       const startTime = eventMatch[2].trim();
       const endTime = eventMatch[3].trim();
-      const loc = eventMatch[4].trim();
+      const field4 = (eventMatch[4] || '').trim();
+      const field5 = (eventMatch[5] || '').trim();
+      const hasExplicitCal = eventMatch[5] !== undefined;
+      const calName = hasExplicitCal ? field4 : undefined;
+      const loc = hasExplicitCal ? field5 : field4;
       reply = reply.replace(eventMatch[0], '').trim();
       if (title && startTime && endTime) {
         try {
@@ -110,6 +188,7 @@ Respond directly to ${USER_NAME}:
             title,
             startTime,
             endTime,
+            calendarName: calName && !/^empty|none$/i.test(calName) ? calName : undefined,
             location: loc && !/^empty|none$/i.test(loc) ? loc : undefined,
           });
         } catch (evtErr: any) {
@@ -124,6 +203,7 @@ Respond directly to ${USER_NAME}:
       reply,
       createdReminder,
       createdEvent,
+      mutatedCalendar,
     });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });

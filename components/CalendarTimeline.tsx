@@ -197,7 +197,9 @@ export function CalendarTimeline({ events, isLoading, onOpenNewEventModal }: Cal
                   >
                     {isTodayGroup && <Sparkles className="w-3 h-3 text-indigo-400" />}
                     <span>{group.label}</span>
-                    <span className="text-zinc-500 font-normal">• {group.dateStr}</span>
+                    {group.label !== group.dateStr && (
+                      <span className="text-zinc-500 font-normal">• {group.dateStr}</span>
+                    )}
                   </div>
                   <div className="flex-1 h-px bg-zinc-800/60" />
                 </div>
