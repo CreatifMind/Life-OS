@@ -35,7 +35,15 @@ export async function POST(req: Request) {
     const emails = emailsResult.status === 'fulfilled' ? emailsResult.value : [];
     const assistantRules = rulesResult.status === 'fulfilled' ? rulesResult.value : [];
 
-    const currentDateMYT = new Date().toLocaleDateString('en-MY', {
+    const now = new Date();
+    const todayIsoMYT = new Intl.DateTimeFormat('en-CA', {
+      timeZone: APP_TIMEZONE,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(now); // YYYY-MM-DD in MYT
+
+    const currentDateMYT = now.toLocaleDateString('en-MY', {
       timeZone: APP_TIMEZONE,
       weekday: 'long',
       year: 'numeric',
@@ -43,7 +51,7 @@ export async function POST(req: Request) {
       day: 'numeric',
     });
 
-    const currentTimeMYT = new Date().toLocaleTimeString('en-MY', {
+    const currentTimeMYT = now.toLocaleTimeString('en-MY', {
       timeZone: APP_TIMEZONE,
       hour: '2-digit',
       minute: '2-digit',
@@ -52,7 +60,8 @@ export async function POST(req: Request) {
 
     const prompt = `
 You are the personal AI Life Assistant for ${USER_NAME} in Life OS.
-Today is ${currentDateMYT}, ${currentTimeMYT} (${APP_TIMEZONE}).
+Today is ${currentDateMYT} (ISO date: ${todayIsoMYT}), current time: ${currentTimeMYT} (${APP_TIMEZONE}).
+IMPORTANT: When ${USER_NAME} says "today", you MUST use ${todayIsoMYT} in any ISO timestamp.
 
 You have live, direct read access to ${USER_NAME}'s Apple Calendar, Apple Reminders, and Gmail.
 Always be direct, clear, concise, and reader-friendly.
@@ -171,6 +180,8 @@ Respond directly to ${USER_NAME}:
     }
 
     // 5. Add New Calendar Event (supports optional 5th calendarName field)
+    // Safety net: if the user asked to move/reschedule/update an existing event and Gemini emitted ADD_EVENT, delete the old copy first!
+    const isMoveIntent = /\b(move|reschedule|shift|change|update|push)\b/i.test(message);
     const eventMatch = /\[\[ADD_EVENT\|([^|\]]+)\|([^|\]]+)\|([^|\]]+)\|([^|\]]*)(?:\|([^\]]*))?\]\]/i.exec(reply);
     if (eventMatch) {
       const title = eventMatch[1].trim();
@@ -184,6 +195,10 @@ Respond directly to ${USER_NAME}:
       reply = reply.replace(eventMatch[0], '').trim();
       if (title && startTime && endTime) {
         try {
+          if (isMoveIntent) {
+            await deleteAppleCalendarEventByTitle(title);
+            mutatedCalendar = true;
+          }
           createdEvent = await createAppleCalendarEvent({
             title,
             startTime,

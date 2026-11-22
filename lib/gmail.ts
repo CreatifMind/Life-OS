@@ -423,6 +423,14 @@ async function fetchEmailsForAccount(account: ConnectedGmailAccount, maxResults:
     const isImportant = (msg.labelIds || []).includes('IMPORTANT');
     const isUnread = (msg.labelIds || []).includes('UNREAD');
 
+    const decodeEntities = (s: string) =>
+      s
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'");
+
     threads.push({
       id: `${account.email}:${item.id}`,
       threadId: item.threadId,
@@ -431,7 +439,7 @@ async function fetchEmailsForAccount(account: ConnectedGmailAccount, maxResults:
       senderEmail,
       subject,
       receivedAt: new Date(date).toISOString(),
-      snippet: msg.snippet || '',
+      snippet: decodeEntities(msg.snippet || ''),
       isUnread,
       isImportant,
     });

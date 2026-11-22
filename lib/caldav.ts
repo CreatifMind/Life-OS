@@ -387,10 +387,10 @@ export async function deleteAppleCalendarEventByTitle(
       'Content-Type': 'application/xml; charset=utf-8',
     }, reportBody);
 
-    const responseBlocks = [...res.text.matchAll(/<response[\s\S]*?<\/response>/gi)];
+    const responseBlocks = [...res.text.matchAll(/<(?:[a-zA-Z0-9_-]+:)?response[\s\S]*?<\/(?:[a-zA-Z0-9_-]+:)?response>/gi)];
     for (const block of responseBlocks) {
       const raw = block[0];
-      const hrefMatch = /<href[^>]*>(.*?)<\/href>/i.exec(raw);
+      const hrefMatch = /<(?:[a-zA-Z0-9_-]+:)?href[^>]*>([\s\S]*?)<\/(?:[a-zA-Z0-9_-]+:)?href>/i.exec(raw);
       const summaryMatch = /SUMMARY(?:;[^:]+)?:([^\r\n]+)/i.exec(raw);
       if (!hrefMatch || !summaryMatch) continue;
 
