@@ -178,6 +178,7 @@ export default function DashboardPage() {
         notes,
       };
       setReminders(prev => [newTask, ...prev]);
+      handleFetchBriefing(true);
     }
   };
 
@@ -205,6 +206,7 @@ export default function DashboardPage() {
           (a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime()
         )
       );
+      handleFetchBriefing(true);
     }
   };
 
@@ -380,18 +382,20 @@ export default function DashboardPage() {
           } else {
             handleSyncData();
           }
+          handleFetchBriefing(true);
         }}
         onEventCreated={(created, needsFullRefresh) => {
           if (needsFullRefresh) {
-            handleSyncData();
+            handleFullSync();
           } else if (created) {
             setEvents(prev =>
               [...prev, created].sort(
                 (a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime()
               )
             );
+            handleFetchBriefing(true);
           } else {
-            handleSyncData();
+            handleFullSync();
           }
         }}
       />
