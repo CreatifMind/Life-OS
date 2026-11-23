@@ -119,12 +119,12 @@ export function GmailTriageWidget({
           </p>
         </div>
       ) : (
-        <div className="divide-y divide-zinc-800/70 flex-1 overflow-y-auto max-h-[380px] pr-1">
+        <div className="divide-y divide-zinc-800/70 flex-1 overflow-y-auto overflow-x-hidden max-h-[380px] pr-1">
           {emails.map(email => (
             <div
               key={email.id}
               onClick={() => onSelectEmail?.(email)}
-              className="py-3 px-2 -mx-2 rounded-lg hover:bg-zinc-800/30 transition-colors group cursor-pointer"
+              className="py-3 px-2 rounded-lg hover:bg-zinc-800/30 transition-colors group cursor-pointer"
             >
               <div className="flex items-start justify-between gap-2 mb-0.5">
                 <span className="text-xs font-semibold text-white tracking-tight truncate max-w-[180px]">

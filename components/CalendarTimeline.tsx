@@ -177,7 +177,7 @@ export function CalendarTimeline({ events, isLoading, onOpenNewEventModal }: Cal
           </p>
         </div>
       ) : (
-        <div className="space-y-4 flex-1 overflow-y-auto max-h-[420px] pr-1">
+        <div className="space-y-4 flex-1 overflow-y-auto overflow-x-hidden max-h-[420px] pr-1">
           {Object.entries(grouped).map(([dateKey, group]) => {
             const isTodayGroup = group.label === 'Today';
             const isTomorrowGroup = group.label === 'Tomorrow';
@@ -211,8 +211,8 @@ export function CalendarTimeline({ events, isLoading, onOpenNewEventModal }: Cal
                     return (
                       <div
                         key={item.instanceId}
-                        className={`py-3 px-2 -mx-2 rounded-lg transition-colors hover:bg-zinc-800/30 ${
-                          isTodayGroup ? 'border-l-2 border-l-indigo-500 pl-3 ml-0 rounded-l-none' : ''
+                        className={`py-3 px-2 rounded-lg transition-colors hover:bg-zinc-800/30 ${
+                          isTodayGroup ? 'border-l-2 border-l-indigo-500 pl-3 rounded-l-none' : ''
                         }`}
                       >
                         <div className="flex items-start justify-between gap-2 mb-1">

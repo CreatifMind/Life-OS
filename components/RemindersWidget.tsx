@@ -191,7 +191,7 @@ export function RemindersWidget({
           </p>
         </div>
       ) : (
-        <div className="flex-1 overflow-y-auto max-h-[380px] pr-1">
+        <div className="flex-1 overflow-y-auto overflow-x-hidden max-h-[380px] pr-1">
           {filteredOpen.length === 0 ? (
             <p className="text-xs text-zinc-500 text-center py-6">
               No open tasks in this view.
@@ -203,7 +203,7 @@ export function RemindersWidget({
                 return (
                   <div
                     key={task.id}
-                    className="group flex items-start gap-3 py-3 px-2 -mx-2 rounded-lg hover:bg-zinc-800/30 transition-colors"
+                    className="group flex items-start gap-3 py-3 px-2 rounded-lg hover:bg-zinc-800/30 transition-colors"
                   >
                     <button
                       onClick={() => handleToggle(task.uid, task.isCompleted)}
@@ -257,7 +257,7 @@ export function RemindersWidget({
                 {completedReminders.map(task => (
                   <div
                     key={task.id}
-                    className="group flex items-center justify-between gap-2.5 py-2 px-2 -mx-2 rounded-lg text-zinc-400 text-xs hover:bg-zinc-800/30 transition-colors"
+                    className="group flex items-center justify-between gap-2.5 py-2 px-2 rounded-lg text-zinc-400 text-xs hover:bg-zinc-800/30 transition-colors"
                   >
                     <div className="flex items-center gap-2 min-w-0">
                       <button

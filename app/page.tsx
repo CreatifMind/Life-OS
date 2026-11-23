@@ -241,7 +241,7 @@ export default function DashboardPage() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#09090b] text-zinc-100">
+    <div className="min-h-screen flex flex-col bg-[#09090b] text-zinc-100 overflow-x-hidden">
       {/* Top Header */}
       <Header
         onRefresh={handleFullSync}
