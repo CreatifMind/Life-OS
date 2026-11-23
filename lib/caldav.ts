@@ -283,8 +283,9 @@ export async function createAppleCalendarEvent(input: {
   });
   const pool = writableCalendars.length > 0 ? writableCalendars : calendars;
 
-  const isMeetingLike = /\b(meeting|call|sync|client|review|standup|interview|expo|fair)\b/i.test(input.title);
-  const preferredDefault = isMeetingLike ? 'work' : 'personal';
+  const isMeetingLike = /\b(meeting|call|sync|client|review|standup|interview|expo|fair|presentation)\b/i.test(input.title);
+  const isPersonalLike = /\b(badminton|gym|workout|run|pickleball|football|dinner|lunch|movie|hangout|date|party|haircut|dentist|doctor|family|friends)\b/i.test(input.title);
+  const preferredDefault = isPersonalLike ? 'personal' : isMeetingLike ? 'work' : 'personal';
 
   const targetCal =
     (input.calendarName && pool.find(c => c.name.toLowerCase() === input.calendarName!.toLowerCase())) ||

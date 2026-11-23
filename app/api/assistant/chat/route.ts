@@ -80,6 +80,11 @@ If ${USER_NAME} states a permanent scheduling/workflow preference ("from now on.
 NEVER fabricate, hallucinate, or guess dates, meetings, or emails not listed below.
 If something is not in the data, state clearly that it is not on the schedule or list.
 
+=== CALENDAR CLASSIFICATION RULES (WORK vs PERSONAL) ===
+- Use "Work" for: meetings, client calls, interviews, syncs, presentations, work trips/fairs/expos (e.g. Japan Expo, Shanghai Fair), business contacts, or anything explicitly labeled Work.
+- Use "Personal" for: sports & fitness (badminton, gym, run, pickleball, football, workout), social plans & meals (dinner, lunch, drinks, movie, hangout, date, family, friends), errands, hobbies, medical appointments, and personal travel/vacations.
+- NEVER carry over "Work" from an earlier message in the conversation when scheduling a personal activity like badminton, gym, or dinner—unless ${USER_NAME} explicitly says it is for Work.
+
 === PERSISTENT USER RULES & PREFERENCES (ALWAYS FOLLOW) ===
 ${assistantRules.length === 0 ? '(None)' : assistantRules.map(r => `- ${r}`).join('\n')}
 
@@ -182,6 +187,11 @@ Respond directly to ${USER_NAME}:
     // 5. Add New Calendar Event (supports optional 5th calendarName field)
     // Safety net: if the user asked to move/reschedule/update an existing event and Gemini emitted ADD_EVENT, delete the old copy first!
     const isMoveIntent = /\b(move|reschedule|shift|change|update|push)\b/i.test(message);
+    const userExplicitlySaidWork = /\b(work|client|office|business)\b/i.test(message);
+    const userExplicitlySaidPersonal = /\b(personal|private)\b/i.test(message);
+    const isObviouslyPersonal = (t: string) =>
+      /\b(badminton|gym|workout|run|running|jog|pickleball|football|futsal|tennis|swim|swimming|dinner|lunch|breakfast|brunch|drinks|coffee|movie|cinema|hangout|date|party|concert|haircut|dentist|doctor|clinic|family|friends|ahma|mom|dad|vacation|holiday)\b/i.test(t);
+
     const eventMatch = /\[\[ADD_EVENT\|([^|\]]+)\|([^|\]]+)\|([^|\]]+)\|([^|\]]*)(?:\|([^\]]*))?\]\]/i.exec(reply);
     if (eventMatch) {
       const title = eventMatch[1].trim();
@@ -190,8 +200,15 @@ Respond directly to ${USER_NAME}:
       const field4 = (eventMatch[4] || '').trim();
       const field5 = (eventMatch[5] || '').trim();
       const hasExplicitCal = eventMatch[5] !== undefined;
-      const calName = hasExplicitCal ? field4 : undefined;
+      let calName = hasExplicitCal ? field4 : undefined;
       const loc = hasExplicitCal ? field5 : field4;
+
+      if (userExplicitlySaidPersonal) {
+        calName = 'Personal';
+      } else if (!userExplicitlySaidWork && isObviouslyPersonal(title)) {
+        calName = 'Personal';
+      }
+
       reply = reply.replace(eventMatch[0], '').trim();
       if (title && startTime && endTime) {
         try {
