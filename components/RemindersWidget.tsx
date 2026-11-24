@@ -191,7 +191,7 @@ export function RemindersWidget({
           </p>
         </div>
       ) : (
-        <div className="flex-1 overflow-y-auto overflow-x-hidden max-h-[380px] pr-1">
+        <div className="flex-1 overflow-y-auto overflow-x-hidden touch-pan-y overscroll-x-none max-h-[380px] pr-1">
           {filteredOpen.length === 0 ? (
             <p className="text-xs text-zinc-500 text-center py-6">
               No open tasks in this view.
@@ -218,8 +218,8 @@ export function RemindersWidget({
                     </button>
 
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-xs font-medium text-white tracking-tight">
+                      <div className="flex items-start gap-2 flex-wrap min-w-0">
+                        <span className="text-xs font-medium text-white tracking-tight break-words whitespace-normal">
                           {task.title}
                         </span>
                         {task.priority === 1 && (
@@ -272,7 +272,7 @@ export function RemindersWidget({
                           <CheckCircle2 className="w-3.5 h-3.5" />
                         )}
                       </button>
-                      <span className="line-through text-zinc-500 truncate">{task.title}</span>
+                      <span className="line-through text-zinc-500 break-words whitespace-normal">{task.title}</span>
                     </div>
 
                     <button

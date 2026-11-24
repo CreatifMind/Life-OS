@@ -119,7 +119,7 @@ export function GmailTriageWidget({
           </p>
         </div>
       ) : (
-        <div className="divide-y divide-zinc-800/70 flex-1 overflow-y-auto overflow-x-hidden max-h-[380px] pr-1">
+        <div className="divide-y divide-zinc-800/70 flex-1 overflow-y-auto overflow-x-hidden touch-pan-y overscroll-x-none max-h-[380px] pr-1">
           {emails.map(email => (
             <div
               key={email.id}

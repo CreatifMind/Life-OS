@@ -177,7 +177,7 @@ export function CalendarTimeline({ events, isLoading, onOpenNewEventModal }: Cal
           </p>
         </div>
       ) : (
-        <div className="space-y-4 flex-1 overflow-y-auto overflow-x-hidden max-h-[420px] pr-1">
+        <div className="space-y-4 flex-1 overflow-y-auto overflow-x-hidden touch-pan-y overscroll-x-none max-h-[420px] pr-1">
           {Object.entries(grouped).map(([dateKey, group]) => {
             const isTodayGroup = group.label === 'Today';
             const isTomorrowGroup = group.label === 'Tomorrow';
@@ -217,7 +217,7 @@ export function CalendarTimeline({ events, isLoading, onOpenNewEventModal }: Cal
                       >
                         <div className="flex items-start justify-between gap-2 mb-1">
                           <div className="flex items-center gap-2 flex-wrap min-w-0">
-                            <h4 className="text-sm font-medium text-white tracking-tight leading-snug">
+                            <h4 className="text-sm font-medium text-white tracking-tight leading-snug break-words whitespace-normal">
                               {event.title}
                             </h4>
                             {item.isMultiDay && (
@@ -247,9 +247,9 @@ export function CalendarTimeline({ events, isLoading, onOpenNewEventModal }: Cal
                           </div>
 
                           {event.location && (
-                            <div className="flex items-center gap-1 text-[11px] text-zinc-400">
-                              <MapPin className="w-3 h-3 text-zinc-500" />
-                              <span className="truncate max-w-[150px]">{event.location}</span>
+                            <div className="flex items-start gap-1 text-[11px] text-zinc-400 min-w-0">
+                              <MapPin className="w-3 h-3 text-zinc-500 shrink-0 mt-0.5" />
+                              <span className="break-words whitespace-normal">{event.location}</span>
                             </div>
                           )}
                         </div>
