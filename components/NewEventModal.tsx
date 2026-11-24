@@ -44,7 +44,8 @@ export function NewEventModal({
       setLocation('');
       setError('');
       if (availableCalendars.length > 0 && !calendarName) {
-        setCalendarName(availableCalendars[0]);
+        const personalCal = availableCalendars.find(c => c.toLowerCase() === 'personal');
+        setCalendarName(personalCal || availableCalendars[0]);
       }
     }
   }, [isOpen, availableCalendars, calendarName]);

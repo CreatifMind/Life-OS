@@ -163,6 +163,25 @@ export async function updateSyncedReminderStatus(uid: string, isCompleted: boole
   await saveSyncedReminders(updated);
 }
 
+export async function completeSyncedReminderByTitle(matchTitle: string): Promise<boolean> {
+  const needle = matchTitle.trim().toLowerCase();
+  if (!needle) return false;
+  const existing = await getSyncedReminders();
+  let matched = false;
+  const updated = existing.map(r => {
+    const t = String(r.title || '').trim().toLowerCase();
+    if (!r.isCompleted && (t === needle || t.includes(needle) || needle.includes(t))) {
+      matched = true;
+      return { ...r, isCompleted: true, completedAt: new Date().toISOString() };
+    }
+    return r;
+  });
+  if (matched) {
+    await saveSyncedReminders(updated);
+  }
+  return matched;
+}
+
 export async function getPendingReminders(): Promise<any[]> {
   const raw = await getAppSetting('PENDING_REMINDERS');
   if (!raw) return [];

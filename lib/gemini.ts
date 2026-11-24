@@ -230,7 +230,7 @@ CRITICAL TEMPORAL ACCURACY RULES:
    - If there are no overdue tasks, imminent events, or urgent emails, return an EMPTY ARRAY: "warningsOrOverdue": [].
 4. Top 3 Priorities:
    - Rank only actionable items: upcoming events/meetings, active reminders/tasks, or priority emails requiring replies.
-   - If today has no remaining upcoming meetings, focus on tomorrow / upcoming multi-day commitments (e.g. Shanghai Fair), active reminders, or priority emails.
+   - If today has no remaining upcoming meetings, focus on tomorrow / upcoming multi-day commitments, active reminders, or priority emails.
 
 ==================== GROUND TRUTH DATA ====================
 1. CALENDAR SCHEDULE:

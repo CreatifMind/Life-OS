@@ -7,7 +7,7 @@ import {
 } from '@/lib/caldav';
 import { fetchRecentEmails } from '@/lib/gmail';
 import { callGemini } from '@/lib/gemini';
-import { addPendingReminder, getAssistantRules, addAssistantRule } from '@/lib/db';
+import { addPendingReminder, completeSyncedReminderByTitle, getAssistantRules, addAssistantRule } from '@/lib/db';
 
 export const maxDuration = 30;
 
@@ -71,6 +71,8 @@ If ${USER_NAME} explicitly asks you to create, add, or set a NEW reminder/task, 
 [[ADD_REMINDER|Exact Task Title|YYYY-MM-DDTHH:mm:ss+08:00 or empty|Optional notes or empty]]
 If ${USER_NAME} asks you to CHANGE, MOVE, RESCHEDULE, or UPDATE an EXISTING reminder/task (NEVER use ADD_REMINDER for an update), confirm it naturally AND append:
 [[UPDATE_REMINDER|Exact Existing Task Title|New Task Title|YYYY-MM-DDTHH:mm:ss+08:00 or empty|Optional notes or empty]]
+If ${USER_NAME} asks you to MARK DONE, COMPLETE, or DELETE/REMOVE an EXISTING reminder/task, confirm it naturally AND append:
+[[COMPLETE_REMINDER|Exact Existing Task Title]]
 If ${USER_NAME} explicitly asks you to schedule, book, or add a NEW calendar event/meeting, confirm it naturally AND append ONE hidden command line at the very end in this exact format:
 [[ADD_EVENT|Exact Event Title|YYYY-MM-DDTHH:mm:ss+08:00|YYYY-MM-DDTHH:mm:ss+08:00|Calendar Name (Work or Personal)|Optional location or empty]]
 If ${USER_NAME} asks you to MOVE, RESCHEDULE, or RE-CATEGORIZE an EXISTING calendar event (e.g. change its time or move it from Personal to Work), confirm it naturally AND append ONE hidden command line (NEVER use ADD_EVENT for a move/update):
@@ -83,19 +85,36 @@ NEVER fabricate, hallucinate, or guess dates, meetings, or emails not listed bel
 If something is not in the data, state clearly that it is not on the schedule or list.
 
 === CALENDAR CLASSIFICATION RULES (WORK vs PERSONAL) ===
-- Use "Work" for: meetings, client calls, interviews, syncs, presentations, work trips/fairs/expos (e.g. Japan Expo, Shanghai Fair), business contacts, or anything explicitly labeled Work.
+- Use "Work" for: meetings, client calls, interviews, syncs, presentations, work trips/conferences/expos/trade fairs, business contacts, or anything explicitly labeled Work.
 - Use "Personal" for: sports & fitness (badminton, gym, run, pickleball, football, workout), social plans & meals (dinner, lunch, drinks, movie, hangout, date, family, friends), errands, hobbies, medical appointments, and personal travel/vacations.
 - NEVER carry over "Work" from an earlier message in the conversation when scheduling a personal activity like badminton, gym, or dinner—unless ${USER_NAME} explicitly says it is for Work.
 
 === PERSISTENT USER RULES & PREFERENCES (ALWAYS FOLLOW) ===
 ${assistantRules.length === 0 ? '(None)' : assistantRules.map(r => `- ${r}`).join('\n')}
 
-Ground Truth Data:
+Ground Truth Data (all times in ${APP_TIMEZONE}):
 === CALENDAR EVENTS ===
-${events.length === 0 ? '(No events)' : events.map(e => `- [${e.calendarName}] "${e.title}" from ${e.startTime} to ${e.endTime}${e.location ? ` @ ${e.location}` : ''}`).join('\n')}
+${events.length === 0 ? '(No events)' : events.map(e => {
+  const s = new Date(e.startTime);
+  const end = new Date(e.endTime || e.startTime);
+  const datePart = s.toLocaleDateString('en-MY', { timeZone: APP_TIMEZONE, weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+  const timePart = e.isAllDay
+    ? 'All Day'
+    : `${s.toLocaleTimeString('en-MY', { timeZone: APP_TIMEZONE, hour: 'numeric', minute: '2-digit', hour12: true })} – ${end.toLocaleTimeString('en-MY', { timeZone: APP_TIMEZONE, hour: 'numeric', minute: '2-digit', hour12: true })}`;
+  return `- [${e.calendarName}] "${e.title}" on ${datePart} (${timePart})${e.location ? ` @ ${e.location}` : ''}`;
+}).join('\n')}
 
 === APPLE REMINDERS ===
-${reminders.length === 0 ? '(No reminders)' : reminders.map(r => `- [${r.isCompleted ? 'COMPLETED' : 'OPEN'}] "${r.title}" (List: ${r.listName}, Priority: ${r.priority}${r.dueDate ? `, Due: ${r.dueDate}` : ''})`).join('\n')}
+${reminders.length === 0 ? '(No reminders)' : reminders.map(r => {
+  let duePart = '';
+  if (r.dueDate) {
+    const d = new Date(r.dueDate);
+    if (!isNaN(d.getTime())) {
+      duePart = `, Due: ${d.toLocaleDateString('en-MY', { timeZone: APP_TIMEZONE, weekday: 'short', month: 'short', day: 'numeric' })} at ${d.toLocaleTimeString('en-MY', { timeZone: APP_TIMEZONE, hour: 'numeric', minute: '2-digit', hour12: true })}`;
+    }
+  }
+  return `- [${r.isCompleted ? 'COMPLETED' : 'OPEN'}] "${r.title}" (List: ${r.listName}${duePart})`;
+}).join('\n')}
 
 === UNREAD GMAIL MESSAGES ===
 ${emails.length === 0 ? '(No unread emails)' : emails.map(m => `- From: "${m.senderName}" <${m.senderEmail}> | Subject: "${m.subject}" | Date: ${m.receivedAt} | Snippet: "${m.snippet}"`).join('\n')}
@@ -126,12 +145,55 @@ Respond directly to ${USER_NAME}:
       }
     }
 
-    // 2a. Update / Reschedule Existing Reminder(s)
+    // Helper: check if a title clearly refers to an existing Calendar Event (not a Reminder)
+    const userExplicitlySaidEvent = /\b(event|calendar|meeting|trip)\b/i.test(message);
+    const findMatchingCalendarEvent = (t: string) => {
+      const needle = t.trim().toLowerCase();
+      return events.find(e => {
+        const et = e.title.trim().toLowerCase();
+        return et === needle || et.includes(needle) || needle.includes(et);
+      });
+    };
+    const hasMatchingReminder = (t: string) => {
+      const needle = t.trim().toLowerCase();
+      return reminders.some(r => {
+        const rt = r.title.trim().toLowerCase();
+        return !r.isCompleted && (rt === needle || rt.includes(needle) || needle.includes(rt));
+      });
+    };
+
+    // 2a. Update / Reschedule Existing Reminder(s) (auto-routed to MOVE_EVENT if target is actually a Calendar Event!)
     for (const updateRemMatch of [...reply.matchAll(/\[\[UPDATE_REMINDER\|([^|\]]+)\|([^|\]]+)\|([^|\]]*)\|([^\]]*)\]\]/gi)]) {
       const existingTitle = updateRemMatch[1].trim();
       const newTitle = updateRemMatch[2].trim() || existingTitle;
       const rawDue = updateRemMatch[3].trim();
       const notes = updateRemMatch[4].trim();
+      reply = reply.replace(updateRemMatch[0], '').trim();
+
+      const matchedCalEvt = findMatchingCalendarEvent(existingTitle);
+      if (matchedCalEvt && (userExplicitlySaidEvent || !hasMatchingReminder(existingTitle))) {
+        const targetCal = /\bpersonal|private\b/i.test(message)
+          ? 'Personal'
+          : /\bwork|office|business\b/i.test(message)
+          ? 'Work'
+          : undefined;
+        try {
+          await deleteAppleCalendarEventByTitle(matchedCalEvt.title);
+          createdEvent = await createAppleCalendarEvent({
+            title: newTitle,
+            startTime: matchedCalEvt.startTime,
+            endTime: matchedCalEvt.endTime,
+            isAllDay: Boolean(matchedCalEvt.isAllDay),
+            calendarName: targetCal || matchedCalEvt.calendarName,
+            location: matchedCalEvt.location,
+          });
+          mutatedCalendar = true;
+        } catch (evtErr: any) {
+          reply = `${reply}\n\n(Warning: Could not update Apple Calendar — ${evtErr.message})`;
+        }
+        continue;
+      }
+
       const dueDate = rawDue && !/^empty|none$/i.test(rawDue) ? rawDue : undefined;
       if (newTitle) {
         createdReminder = await addPendingReminder({
@@ -142,7 +204,6 @@ Respond directly to ${USER_NAME}:
         });
         mutatedReminders = true;
       }
-      reply = reply.replace(updateRemMatch[0], '').trim();
     }
 
     // 2b. Add Reminder(s) (with move/update safety net to prevent duplicates)
@@ -161,6 +222,19 @@ Respond directly to ${USER_NAME}:
         if (isMoveIntent) mutatedReminders = true;
       }
       reply = reply.replace(addMatch[0], '').trim();
+    }
+
+    // 2c. Complete / Remove Existing Reminder(s)
+    for (const compMatch of [...reply.matchAll(/\[\[COMPLETE_REMINDER\|([^\]]+)\]\]/gi)]) {
+      const targetTitle = compMatch[1].trim();
+      reply = reply.replace(compMatch[0], '').trim();
+      if (targetTitle) {
+        const ok = await completeSyncedReminderByTitle(targetTitle);
+        mutatedReminders = true;
+        if (!ok) {
+          reply = `${reply}\n\n(Note: Could not find an open reminder matching "${targetTitle}".)`;
+        }
+      }
     }
 
     // 3. Move / Update Existing Calendar Event(s) (delete old + create updated, preserving isAllDay)
