@@ -24,7 +24,7 @@ export async function POST(req: Request) {
 
     // 1. Fetch live ground truth + persistent user rules
     const [eventsResult, remindersResult, emailsResult, rulesResult] = await Promise.allSettled([
-      fetchLiveCalendarEvents(14, 30),
+      fetchLiveCalendarEvents(14, 60),
       fetchLiveReminders(),
       fetchRecentEmails(10),
       getAssistantRules(),
@@ -67,8 +67,10 @@ You have live, direct read access to ${USER_NAME}'s Apple Calendar, Apple Remind
 Always be direct, clear, concise, and reader-friendly.
 NEVER output JSON, code blocks, or raw ISO timestamps.
 Format your reply in clean, scannable plain text using bullet points (•), line breaks, and friendly dates/times (e.g. "Mon, Nov 16" or "2:00 PM").
-If ${USER_NAME} explicitly asks you to create, add, or set a reminder/task, confirm it naturally AND append ONE hidden command line at the very end in this exact format:
+If ${USER_NAME} explicitly asks you to create, add, or set a NEW reminder/task, confirm it naturally AND append ONE hidden command line at the very end in this exact format:
 [[ADD_REMINDER|Exact Task Title|YYYY-MM-DDTHH:mm:ss+08:00 or empty|Optional notes or empty]]
+If ${USER_NAME} asks you to CHANGE, MOVE, RESCHEDULE, or UPDATE an EXISTING reminder/task (NEVER use ADD_REMINDER for an update), confirm it naturally AND append:
+[[UPDATE_REMINDER|Exact Existing Task Title|New Task Title|YYYY-MM-DDTHH:mm:ss+08:00 or empty|Optional notes or empty]]
 If ${USER_NAME} explicitly asks you to schedule, book, or add a NEW calendar event/meeting, confirm it naturally AND append ONE hidden command line at the very end in this exact format:
 [[ADD_EVENT|Exact Event Title|YYYY-MM-DDTHH:mm:ss+08:00|YYYY-MM-DDTHH:mm:ss+08:00|Calendar Name (Work or Personal)|Optional location or empty]]
 If ${USER_NAME} asks you to MOVE, RESCHEDULE, or RE-CATEGORIZE an EXISTING calendar event (e.g. change its time or move it from Personal to Work), confirm it naturally AND append ONE hidden command line (NEVER use ADD_EVENT for a move/update):
@@ -109,12 +111,14 @@ Respond directly to ${USER_NAME}:
     const rawReply = await callGemini(prompt, 'text/plain');
     let reply = rawReply;
     let createdReminder: any = null;
+    let mutatedReminders = false;
     let createdEvent: any = null;
     let mutatedCalendar = false;
 
-    // 1. Save persistent rule if requested
-    const ruleMatch = /\[\[SAVE_RULE\|([^\]]+)\]\]/i.exec(reply);
-    if (ruleMatch) {
+    const isMoveIntent = /\b(move|reschedule|shift|change|update|push)\b/i.test(message);
+
+    // 1. Save persistent rule(s) if requested
+    for (const ruleMatch of [...reply.matchAll(/\[\[SAVE_RULE\|([^\]]+)\]\]/gi)]) {
       const ruleText = ruleMatch[1].trim();
       reply = reply.replace(ruleMatch[0], '').trim();
       if (ruleText) {
@@ -122,9 +126,27 @@ Respond directly to ${USER_NAME}:
       }
     }
 
-    // 2. Add Reminder
-    const addMatch = /\[\[ADD_REMINDER\|([^|\]]+)\|([^|\]]*)\|([^\]]*)\]\]/i.exec(reply);
-    if (addMatch) {
+    // 2a. Update / Reschedule Existing Reminder(s)
+    for (const updateRemMatch of [...reply.matchAll(/\[\[UPDATE_REMINDER\|([^|\]]+)\|([^|\]]+)\|([^|\]]*)\|([^\]]*)\]\]/gi)]) {
+      const existingTitle = updateRemMatch[1].trim();
+      const newTitle = updateRemMatch[2].trim() || existingTitle;
+      const rawDue = updateRemMatch[3].trim();
+      const notes = updateRemMatch[4].trim();
+      const dueDate = rawDue && !/^empty|none$/i.test(rawDue) ? rawDue : undefined;
+      if (newTitle) {
+        createdReminder = await addPendingReminder({
+          title: newTitle,
+          replaceTitle: existingTitle,
+          dueDate,
+          notes: notes && !/^empty|none$/i.test(notes) ? notes : undefined,
+        });
+        mutatedReminders = true;
+      }
+      reply = reply.replace(updateRemMatch[0], '').trim();
+    }
+
+    // 2b. Add Reminder(s) (with move/update safety net to prevent duplicates)
+    for (const addMatch of [...reply.matchAll(/\[\[ADD_REMINDER\|([^|\]]+)\|([^|\]]*)\|([^\]]*)\]\]/gi)]) {
       const title = addMatch[1].trim();
       const rawDue = addMatch[2].trim();
       const notes = addMatch[3].trim();
@@ -132,16 +154,17 @@ Respond directly to ${USER_NAME}:
       if (title) {
         createdReminder = await addPendingReminder({
           title,
+          replaceTitle: isMoveIntent ? title : undefined,
           dueDate,
           notes: notes && !/^empty|none$/i.test(notes) ? notes : undefined,
         });
+        if (isMoveIntent) mutatedReminders = true;
       }
       reply = reply.replace(addMatch[0], '').trim();
     }
 
-    // 3. Move / Update Existing Calendar Event (delete old + create updated)
-    const moveMatch = /\[\[MOVE_EVENT\|([^|\]]+)\|([^|\]]+)\|([^|\]]+)\|([^|\]]+)\|([^|\]]*)\|([^\]]*)\]\]/i.exec(reply);
-    if (moveMatch) {
+    // 3. Move / Update Existing Calendar Event(s) (delete old + create updated, preserving isAllDay)
+    for (const moveMatch of [...reply.matchAll(/\[\[MOVE_EVENT\|([^|\]]+)\|([^|\]]+)\|([^|\]]+)\|([^|\]]+)\|([^|\]]*)\|([^\]]*)\]\]/gi)]) {
       const existingTitle = moveMatch[1].trim();
       const newTitle = moveMatch[2].trim() || existingTitle;
       const startTime = moveMatch[3].trim();
@@ -149,14 +172,23 @@ Respond directly to ${USER_NAME}:
       const calName = moveMatch[5].trim();
       const loc = moveMatch[6].trim();
       reply = reply.replace(moveMatch[0], '').trim();
+
+      const normExisting = existingTitle.toLowerCase();
+      const matchedOrig = events.find(e => {
+        const t = e.title.trim().toLowerCase();
+        return t === normExisting || t.includes(normExisting) || normExisting.includes(t);
+      });
+      const preserveAllDay = Boolean(matchedOrig?.isAllDay);
+
       try {
         const delResult = await deleteAppleCalendarEventByTitle(existingTitle);
         createdEvent = await createAppleCalendarEvent({
           title: newTitle,
-          startTime,
-          endTime,
+          startTime: preserveAllDay && matchedOrig ? matchedOrig.startTime : startTime,
+          endTime: preserveAllDay && matchedOrig ? matchedOrig.endTime : endTime,
+          isAllDay: preserveAllDay,
           calendarName: calName && !/^empty|none$/i.test(calName) ? calName : delResult.deletedCalendar,
-          location: loc && !/^empty|none$/i.test(loc) ? loc : undefined,
+          location: loc && !/^empty|none$/i.test(loc) ? loc : matchedOrig?.location,
         });
         mutatedCalendar = true;
         if (delResult.deletedCount === 0) {
@@ -168,9 +200,8 @@ Respond directly to ${USER_NAME}:
       }
     }
 
-    // 4. Delete Existing Calendar Event
-    const deleteMatch = /\[\[DELETE_EVENT\|([^\]]+)\]\]/i.exec(reply);
-    if (deleteMatch) {
+    // 4. Delete Existing Calendar Event(s)
+    for (const deleteMatch of [...reply.matchAll(/\[\[DELETE_EVENT\|([^\]]+)\]\]/gi)]) {
       const targetTitle = deleteMatch[1].trim();
       reply = reply.replace(deleteMatch[0], '').trim();
       try {
@@ -184,16 +215,13 @@ Respond directly to ${USER_NAME}:
       }
     }
 
-    // 5. Add New Calendar Event (supports optional 5th calendarName field)
-    // Safety net: if the user asked to move/reschedule/update an existing event and Gemini emitted ADD_EVENT, delete the old copy first!
-    const isMoveIntent = /\b(move|reschedule|shift|change|update|push)\b/i.test(message);
+    // 5. Add New Calendar Event(s) (supports optional 5th calendarName field)
     const userExplicitlySaidWork = /\b(work|client|office|business)\b/i.test(message);
     const userExplicitlySaidPersonal = /\b(personal|private)\b/i.test(message);
     const isObviouslyPersonal = (t: string) =>
       /\b(badminton|gym|workout|run|running|jog|pickleball|football|futsal|tennis|swim|swimming|dinner|lunch|breakfast|brunch|drinks|coffee|movie|cinema|hangout|date|party|concert|haircut|dentist|doctor|clinic|family|friends|ahma|mom|dad|vacation|holiday)\b/i.test(t);
 
-    const eventMatch = /\[\[ADD_EVENT\|([^|\]]+)\|([^|\]]+)\|([^|\]]+)\|([^|\]]*)(?:\|([^\]]*))?\]\]/i.exec(reply);
-    if (eventMatch) {
+    for (const eventMatch of [...reply.matchAll(/\[\[ADD_EVENT\|([^|\]]+)\|([^|\]]+)\|([^|\]]+)\|([^|\]]*)(?:\|([^\]]*))?\]\]/gi)]) {
       const title = eventMatch[1].trim();
       const startTime = eventMatch[2].trim();
       const endTime = eventMatch[3].trim();
@@ -212,14 +240,28 @@ Respond directly to ${USER_NAME}:
       reply = reply.replace(eventMatch[0], '').trim();
       if (title && startTime && endTime) {
         try {
+          let preserveAllDay = false;
+          let origStart = startTime;
+          let origEnd = endTime;
           if (isMoveIntent) {
+            const normT = title.toLowerCase();
+            const matchedOrig = events.find(e => {
+              const et = e.title.trim().toLowerCase();
+              return et === normT || et.includes(normT) || normT.includes(et);
+            });
+            if (matchedOrig?.isAllDay) {
+              preserveAllDay = true;
+              origStart = matchedOrig.startTime;
+              origEnd = matchedOrig.endTime;
+            }
             await deleteAppleCalendarEventByTitle(title);
             mutatedCalendar = true;
           }
           createdEvent = await createAppleCalendarEvent({
             title,
-            startTime,
-            endTime,
+            startTime: origStart,
+            endTime: origEnd,
+            isAllDay: preserveAllDay,
             calendarName: calName && !/^empty|none$/i.test(calName) ? calName : undefined,
             location: loc && !/^empty|none$/i.test(loc) ? loc : undefined,
           });
@@ -234,6 +276,7 @@ Respond directly to ${USER_NAME}:
       success: true,
       reply,
       createdReminder,
+      mutatedReminders,
       createdEvent,
       mutatedCalendar,
     });

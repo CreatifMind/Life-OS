@@ -179,10 +179,12 @@ export async function addPendingReminder(input: {
   listName?: string;
   dueDate?: string;
   notes?: string;
+  replaceTitle?: string;
 }): Promise<any> {
   const cleanTitle = input.title.trim();
   const listName = (input.listName || 'Reminders').trim();
   const uid = `lifeos-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+  const matchKey = (input.replaceTitle || cleanTitle).trim().toLowerCase();
 
   const newTask = {
     id: uid,
@@ -193,15 +195,22 @@ export async function addPendingReminder(input: {
     priority: 0 as const,
     dueDate: input.dueDate || undefined,
     notes: input.notes?.trim() || undefined,
+    replaceTitle: input.replaceTitle?.trim() || undefined,
   };
 
   const pending = await getPendingReminders();
-  pending.push(newTask);
-  await saveAppSetting('PENDING_REMINDERS', JSON.stringify(pending));
+  const filteredPending = pending.filter(
+    p => String(p.title || '').trim().toLowerCase() !== matchKey
+  );
+  filteredPending.push(newTask);
+  await saveAppSetting('PENDING_REMINDERS', JSON.stringify(filteredPending));
 
   const synced = await getSyncedReminders();
-  synced.unshift(newTask);
-  await saveSyncedReminders(synced);
+  const filteredSynced = synced.filter(
+    r => r.isCompleted || String(r.title || '').trim().toLowerCase() !== matchKey
+  );
+  filteredSynced.unshift(newTask);
+  await saveSyncedReminders(filteredSynced);
 
   return newTask;
 }

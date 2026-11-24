@@ -376,13 +376,20 @@ export default function DashboardPage() {
 
       {/* Live Grounded AI Life Assistant */}
       <LifeAssistantDrawer
-        onReminderCreated={created => {
-          if (created) {
-            setReminders(prev => [created, ...prev]);
+        onReminderCreated={(created, needsFullRefresh) => {
+          if (needsFullRefresh) {
+            handleFullSync();
+          } else if (created) {
+            setReminders(prev => [
+              created,
+              ...prev.filter(
+                r => r.isCompleted || r.title.trim().toLowerCase() !== created.title.trim().toLowerCase()
+              ),
+            ]);
+            handleFetchBriefing(true);
           } else {
-            handleSyncData();
+            handleFullSync();
           }
-          handleFetchBriefing(true);
         }}
         onEventCreated={(created, needsFullRefresh) => {
           if (needsFullRefresh) {

@@ -11,7 +11,7 @@ interface Message {
 }
 
 interface LifeAssistantDrawerProps {
-  onReminderCreated?: (reminder?: ReminderTask) => void;
+  onReminderCreated?: (reminder?: ReminderTask, needsFullRefresh?: boolean) => void;
   onEventCreated?: (event?: CalendarEvent, needsFullRefresh?: boolean) => void;
 }
 
@@ -60,8 +60,8 @@ export function LifeAssistantDrawer({ onReminderCreated, onEventCreated }: LifeA
       const data = await res.json();
       if (data.success && data.reply) {
         setMessages(prev => [...prev, { role: 'model', text: data.reply }]);
-        if (data.createdReminder) {
-          onReminderCreated?.(data.createdReminder);
+        if (data.createdReminder || data.mutatedReminders) {
+          onReminderCreated?.(data.createdReminder, Boolean(data.mutatedReminders));
         }
         if (data.createdEvent || data.mutatedCalendar) {
           onEventCreated?.(data.createdEvent, Boolean(data.mutatedCalendar));

@@ -95,6 +95,8 @@ export function CalendarTimeline({ events, isLoading, onOpenNewEventModal }: Cal
   // Filter into Upcoming (today onwards) vs Past
   const futureOrTodayItems = expandedItems.filter(item => item.instanceDate.getTime() >= startOfToday);
   const pastItems = expandedItems.filter(item => item.instanceDate.getTime() < startOfToday);
+  const uniqueUpcomingCount = new Set(futureOrTodayItems.map(i => i.originalEvent.id)).size;
+  const uniquePastCount = new Set(pastItems.map(i => i.originalEvent.id)).size;
 
   const displayList = showPast ? pastItems : futureOrTodayItems;
 
@@ -135,7 +137,7 @@ export function CalendarTimeline({ events, isLoading, onOpenNewEventModal }: Cal
                 !showPast ? 'bg-zinc-800 text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-300'
               }`}
             >
-              Upcoming ({futureOrTodayItems.length})
+              Upcoming ({uniqueUpcomingCount})
             </button>
             <button
               onClick={() => setShowPast(true)}
@@ -143,7 +145,7 @@ export function CalendarTimeline({ events, isLoading, onOpenNewEventModal }: Cal
                 showPast ? 'bg-zinc-800 text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-300'
               }`}
             >
-              Past ({pastItems.length})
+              Past ({uniquePastCount})
             </button>
           </div>
           {onOpenNewEventModal && (
