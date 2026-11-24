@@ -8,6 +8,7 @@ interface CalendarTimelineProps {
   events: CalendarEvent[];
   isLoading: boolean;
   onOpenNewEventModal?: () => void;
+  onSelectEvent?: (event: CalendarEvent) => void;
 }
 
 interface ExpandedTimelineItem {
@@ -21,7 +22,7 @@ interface ExpandedTimelineItem {
   dateRangeLabel?: string;
 }
 
-export function CalendarTimeline({ events, isLoading, onOpenNewEventModal }: CalendarTimelineProps) {
+export function CalendarTimeline({ events, isLoading, onOpenNewEventModal, onSelectEvent }: CalendarTimelineProps) {
   const [showPast, setShowPast] = useState(false);
 
   const formatTime = (isoString: string) => {
@@ -211,7 +212,10 @@ export function CalendarTimeline({ events, isLoading, onOpenNewEventModal }: Cal
                     return (
                       <div
                         key={item.instanceId}
+                        onClick={() => onSelectEvent?.(event)}
                         className={`py-3 px-2 rounded-lg transition-colors hover:bg-zinc-800/30 ${
+                          onSelectEvent ? 'cursor-pointer' : ''
+                        } ${
                           isTodayGroup ? 'border-l-2 border-l-white/80 pl-3 rounded-l-none' : ''
                         }`}
                       >

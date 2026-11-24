@@ -395,6 +395,78 @@ export async function deleteAppleCalendarEventByTitle(
   return { deletedCount, deletedCalendar };
 }
 
+export async function deleteAppleCalendarEventByUid(
+  eventUid: string,
+  fallbackTitle?: string,
+  daysPast = 30,
+  daysFuture = 120
+): Promise<{ deletedCount: number; deletedCalendar?: string }> {
+  const { calendars } = await discoverCollections();
+  const cleanUid = eventUid.trim();
+  const needle = (fallbackTitle || '').trim().toLowerCase();
+
+  const now = new Date();
+  const startRange = new Date(now.getTime() - daysPast * 24 * 60 * 60 * 1000).toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+  const endRange = new Date(now.getTime() + daysFuture * 24 * 60 * 60 * 1000).toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+
+  let deletedCount = 0;
+  let deletedCalendar: string | undefined;
+
+  for (const cal of calendars) {
+    const lowerCal = cal.name.toLowerCase();
+    if (lowerCal.includes('holiday') || lowerCal.includes('birthday') || lowerCal.includes('siri')) {
+      continue;
+    }
+
+    const reportBody = `<?xml version="1.0" encoding="utf-8" ?>
+<c:calendar-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
+  <d:prop><d:getetag /><c:calendar-data /></d:prop>
+  <c:filter>
+    <c:comp-filter name="VCALENDAR">
+      <c:comp-filter name="VEVENT">
+        <c:time-range start="${startRange}" end="${endRange}" />
+      </c:comp-filter>
+    </c:comp-filter>
+  </c:filter>
+</c:calendar-query>`;
+
+    const res = await davRequest(cal.url, 'REPORT', {
+      'Depth': '1',
+      'Content-Type': 'application/xml; charset=utf-8',
+    }, reportBody);
+
+    const responseBlocks = [...res.text.matchAll(/<(?:[a-zA-Z0-9_-]+:)?response[\s\S]*?<\/(?:[a-zA-Z0-9_-]+:)?response>/gi)];
+    for (const block of responseBlocks) {
+      const raw = block[0];
+      const hrefMatch = /<(?:[a-zA-Z0-9_-]+:)?href[^>]*>([\s\S]*?)<\/(?:[a-zA-Z0-9_-]+:)?href>/i.exec(raw);
+      const uidMatch = /UID:([^\r\n]+)/i.exec(raw);
+      const summaryMatch = /SUMMARY(?:;[^:]+)?:([^\r\n]+)/i.exec(raw);
+      if (!hrefMatch) continue;
+
+      const rawUid = uidMatch ? uidMatch[1].trim() : '';
+      const rawSummary = summaryMatch ? summaryMatch[1].trim().toLowerCase() : '';
+      const matchedByUid = Boolean(cleanUid && rawUid === cleanUid);
+      const matchedByTitle = !cleanUid && Boolean(needle && rawSummary === needle);
+
+      if (matchedByUid || matchedByTitle) {
+        const itemUrl = resolveUrl(cal.url, hrefMatch[1].trim());
+        const delRes = await davRequest(itemUrl, 'DELETE');
+        if (delRes.status < 400) {
+          deletedCount += 1;
+          deletedCalendar = cal.name;
+          if (matchedByUid) return { deletedCount, deletedCalendar };
+        }
+      }
+    }
+  }
+
+  if (deletedCount === 0 && fallbackTitle) {
+    return deleteAppleCalendarEventByTitle(fallbackTitle, daysPast, daysFuture);
+  }
+
+  return { deletedCount, deletedCalendar };
+}
+
 const DEFAULT_TIMEZONE_OFFSET = process.env.TIMEZONE_OFFSET || '+08:00';
 
 function parseIcsDate(str: string): string {

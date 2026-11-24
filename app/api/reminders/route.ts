@@ -48,3 +48,26 @@ export async function PATCH(req: Request) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
   }
 }
+
+export async function PUT(req: Request) {
+  try {
+    const body = await req.json();
+    const { oldTitle, title, listName, dueDate, notes } = body || {};
+
+    if (!title || !String(title).trim()) {
+      return NextResponse.json({ success: false, error: 'Title is required' }, { status: 400 });
+    }
+
+    const task = await addPendingReminder({
+      title: String(title),
+      replaceTitle: oldTitle ? String(oldTitle) : String(title),
+      listName: listName ? String(listName) : 'Reminders',
+      dueDate: dueDate ? String(dueDate) : undefined,
+      notes: notes ? String(notes) : undefined,
+    });
+
+    return NextResponse.json({ success: true, task });
+  } catch (err: any) {
+    return NextResponse.json({ success: false, error: err.message }, { status: 500 });
+  }
+}

@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { CheckSquare, CheckCircle2, Circle, Plus, Loader2 } from 'lucide-react';
+import { CheckSquare, CheckCircle2, Circle, Plus, Loader2, ChevronDown, ChevronRight } from 'lucide-react';
 import { ReminderTask } from '@/lib/types';
 
 type TaskFilter = 'all' | 'overdue' | 'today' | 'next7';
@@ -12,6 +12,7 @@ interface RemindersWidgetProps {
   onToggleTask: (uid: string, nextStatus: boolean) => Promise<void>;
   onOpenNewTaskModal: () => void;
   onQuickAddTask?: (title: string) => Promise<void>;
+  onSelectTask?: (task: ReminderTask) => void;
 }
 
 export function RemindersWidget({
@@ -20,11 +21,13 @@ export function RemindersWidget({
   onToggleTask,
   onOpenNewTaskModal,
   onQuickAddTask,
+  onSelectTask,
 }: RemindersWidgetProps) {
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const [filter, setFilter] = useState<TaskFilter>('all');
   const [quickTitle, setQuickTitle] = useState('');
   const [isAdding, setIsAdding] = useState(false);
+  const [showCompleted, setShowCompleted] = useState(false);
 
   const handleToggle = async (uid: string, currentStatus: boolean) => {
     try {
@@ -202,10 +205,16 @@ export function RemindersWidget({
                 return (
                   <div
                     key={task.id}
-                    className="group flex items-start gap-3 py-3 px-2 rounded-lg hover:bg-zinc-800/30 transition-colors"
+                    onClick={() => onSelectTask?.(task)}
+                    className={`group flex items-start gap-3 py-3 px-2 rounded-lg hover:bg-zinc-800/30 transition-colors ${
+                      onSelectTask ? 'cursor-pointer' : ''
+                    }`}
                   >
                     <button
-                      onClick={() => handleToggle(task.uid, task.isCompleted)}
+                      onClick={e => {
+                        e.stopPropagation();
+                        handleToggle(task.uid, task.isCompleted);
+                      }}
                       disabled={togglingId === task.uid}
                       className="mt-0.5 text-zinc-500 hover:text-amber-400 transition-colors shrink-0 disabled:opacity-50"
                     >
@@ -246,44 +255,50 @@ export function RemindersWidget({
             </div>
           )}
 
-          {/* Completed Tasks section */}
+          {/* Completed Tasks section (collapsible) */}
           {completedReminders.length > 0 && (
             <div className="pt-3 mt-2 border-t border-zinc-800/60">
-              <span className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider block mb-1.5">
-                Completed ({completedReminders.length})
-              </span>
-              <div className="divide-y divide-zinc-800/50">
-                {completedReminders.map(task => (
-                  <div
-                    key={task.id}
-                    className="group flex items-center justify-between gap-2.5 py-2 px-2 rounded-lg text-zinc-400 text-xs hover:bg-zinc-800/30 transition-colors"
-                  >
-                    <div className="flex items-center gap-2 min-w-0">
+              <button
+                onClick={() => setShowCompleted(prev => !prev)}
+                className="flex items-center gap-1 text-[11px] font-medium text-zinc-500 hover:text-zinc-300 mb-1.5 transition-colors"
+              >
+                {showCompleted ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+                <span>Completed ({completedReminders.length})</span>
+              </button>
+              {showCompleted && (
+                <div className="divide-y divide-zinc-800/50">
+                  {completedReminders.map(task => (
+                    <div
+                      key={task.id}
+                      className="group flex items-center justify-between gap-2.5 py-2 px-2 rounded-lg text-zinc-400 text-xs hover:bg-zinc-800/30 transition-colors"
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <button
+                          onClick={() => handleToggle(task.uid, task.isCompleted)}
+                          disabled={togglingId === task.uid}
+                          className="text-emerald-500/70 hover:text-amber-400 transition-colors shrink-0 disabled:opacity-50"
+                          title="Click to mark incomplete / undo"
+                        >
+                          {togglingId === task.uid ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-400" />
+                          ) : (
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                          )}
+                        </button>
+                        <span className="line-through text-zinc-500 break-words whitespace-normal">{task.title}</span>
+                      </div>
+
                       <button
                         onClick={() => handleToggle(task.uid, task.isCompleted)}
                         disabled={togglingId === task.uid}
-                        className="text-emerald-500/70 hover:text-amber-400 transition-colors shrink-0 disabled:opacity-50"
-                        title="Click to mark incomplete / undo"
+                        className="text-[10px] text-zinc-500 hover:text-zinc-300 font-medium px-2 py-0.5 rounded bg-zinc-900 border border-zinc-800 transition-colors shrink-0"
                       >
-                        {togglingId === task.uid ? (
-                          <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-400" />
-                        ) : (
-                          <CheckCircle2 className="w-3.5 h-3.5" />
-                        )}
+                        Undo
                       </button>
-                      <span className="line-through text-zinc-500 break-words whitespace-normal">{task.title}</span>
                     </div>
-
-                    <button
-                      onClick={() => handleToggle(task.uid, task.isCompleted)}
-                      disabled={togglingId === task.uid}
-                      className="text-[10px] text-zinc-500 hover:text-zinc-300 font-medium px-2 py-0.5 rounded bg-zinc-900 border border-zinc-800 transition-colors shrink-0"
-                    >
-                      Undo
-                    </button>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>

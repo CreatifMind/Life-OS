@@ -8,7 +8,9 @@ import { RemindersWidget } from '@/components/RemindersWidget';
 import { GmailTriageWidget } from '@/components/GmailTriageWidget';
 import { EmailDetailModal } from '@/components/EmailDetailModal';
 import { NewReminderModal } from '@/components/NewReminderModal';
+import { EditReminderModal } from '@/components/EditReminderModal';
 import { NewEventModal } from '@/components/NewEventModal';
+import { EventDetailModal } from '@/components/EventDetailModal';
 import { LifeAssistantDrawer } from '@/components/LifeAssistantDrawer';
 import { CalendarEvent, ReminderTask, EmailThread, DailyBriefing, SyncHealthStatus } from '@/lib/types';
 
@@ -27,6 +29,8 @@ export default function DashboardPage() {
   const [isBriefingLoading, setIsBriefingLoading] = useState<boolean>(false);
   const [mobileTab, setMobileTab] = useState<MobileTab>('briefing');
   const [selectedEmail, setSelectedEmail] = useState<EmailThread | null>(null);
+  const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null);
+  const [selectedReminder, setSelectedReminder] = useState<ReminderTask | null>(null);
   const [authBanner, setAuthBanner] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   // Modal state
@@ -227,6 +231,88 @@ export default function DashboardPage() {
     }
   };
 
+  // Update Existing Apple Reminder (in-place in Life OS + Mac EventKit sync)
+  const handleUpdateTask = async (
+    oldReminder: ReminderTask,
+    updates: { title: string; dueDate?: string; notes?: string }
+  ) => {
+    const res = await fetch('/api/reminders', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        oldTitle: oldReminder.title,
+        title: updates.title,
+        listName: oldReminder.listName,
+        dueDate: updates.dueDate,
+        notes: updates.notes,
+      }),
+    });
+    const json = await res.json();
+    if (!res.ok || !json.success) {
+      throw new Error(json.error || 'Failed to update reminder');
+    }
+    if (json.task) {
+      setReminders(prev => [
+        json.task,
+        ...prev.filter(
+          r => r.uid !== oldReminder.uid && r.title.trim().toLowerCase() !== oldReminder.title.trim().toLowerCase()
+        ),
+      ]);
+      handleFetchBriefing(true);
+    }
+  };
+
+  // Update Existing Apple Calendar Event via CalDAV
+  const handleUpdateEvent = async (
+    oldEvent: CalendarEvent,
+    payload: {
+      title: string;
+      startTime: string;
+      endTime: string;
+      isAllDay: boolean;
+      location?: string;
+      description?: string;
+      calendarName?: string;
+    }
+  ) => {
+    const res = await fetch('/api/calendar', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: oldEvent.id,
+        oldTitle: oldEvent.title,
+        ...payload,
+      }),
+    });
+    const json = await res.json();
+    if (!res.ok || !json.success) {
+      throw new Error(json.error || 'Failed to update event');
+    }
+    if (json.event) {
+      setEvents(prev =>
+        [...prev.filter(e => e.id !== oldEvent.id), json.event].sort(
+          (a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime()
+        )
+      );
+      handleFetchBriefing(true);
+    }
+  };
+
+  // Delete Apple Calendar Event via CalDAV
+  const handleDeleteEvent = async (eventToDelete: CalendarEvent) => {
+    const res = await fetch('/api/calendar', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: eventToDelete.id, title: eventToDelete.title }),
+    });
+    const json = await res.json();
+    if (!res.ok || !json.success) {
+      throw new Error(json.error || 'Failed to delete event');
+    }
+    setEvents(prev => prev.filter(e => e.id !== eventToDelete.id));
+    handleFetchBriefing(true);
+  };
+
   // Convert Email to Reminder Workflow
   const handleConvertToTask = (email: EmailThread) => {
     setModalTitle(`Follow up: ${email.subject}`);
@@ -333,6 +419,7 @@ export default function DashboardPage() {
               events={events}
               isLoading={isSyncing && events.length === 0}
               onOpenNewEventModal={() => setIsEventModalOpen(true)}
+              onSelectEvent={evt => setSelectedEvent(evt)}
             />
           </div>
 
@@ -343,6 +430,7 @@ export default function DashboardPage() {
               isLoading={isSyncing && reminders.length === 0}
               onToggleTask={handleToggleTask}
               onQuickAddTask={(title) => handleCreateTask(title)}
+              onSelectTask={task => setSelectedReminder(task)}
               onOpenNewTaskModal={() => {
                 setModalTitle('');
                 setModalNotes('');
@@ -399,6 +487,21 @@ export default function DashboardPage() {
         )}
       />
 
+      {/* Calendar Event View / Edit / Delete Modal */}
+      <EventDetailModal
+        event={selectedEvent}
+        availableCalendars={Array.from(
+          new Set(
+            events
+              .map(e => e.calendarName)
+              .filter(c => c && !/holiday|birthday|siri/i.test(c))
+          )
+        )}
+        onClose={() => setSelectedEvent(null)}
+        onUpdate={handleUpdateEvent}
+        onDelete={handleDeleteEvent}
+      />
+
       {/* Quick Add Apple Reminder Modal */}
       <NewReminderModal
         isOpen={isModalOpen}
@@ -406,6 +509,14 @@ export default function DashboardPage() {
         onSubmit={handleCreateTask}
         initialTitle={modalTitle}
         initialNotes={modalNotes}
+      />
+
+      {/* Edit Existing Reminder Modal */}
+      <EditReminderModal
+        reminder={selectedReminder}
+        onClose={() => setSelectedReminder(null)}
+        onSave={handleUpdateTask}
+        onMarkComplete={uid => handleToggleTask(uid, true)}
       />
 
       {/* Live Grounded AI Life Assistant */}
