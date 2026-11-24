@@ -319,7 +319,7 @@ function sanitizeEmailHtml(html: string, rawMessageId: string, accountEmail: str
     }
   }
 
-  const headInject = `<base target="_blank" /><style>body{margin:0;padding:16px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:14px;line-height:1.5;color:#18181b;background:#ffffff;word-wrap:break-word;overflow-wrap:break-word;}img{max-width:100%!important;height:auto!important;}a{color:#2563eb;}</style>`;
+  const headInject = `<meta name="viewport" content="width=device-width, initial-scale=1.0" /><base target="_blank" /><style>html,body{margin:0;padding:16px;max-width:100%!important;overflow-x:hidden!important;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:14px;line-height:1.5;color:#18181b;background:#ffffff;word-wrap:break-word;overflow-wrap:break-word;box-sizing:border-box;}*,*::before,*::after{box-sizing:border-box!important;}table,tbody,tr,td,div,section,center{max-width:100%!important;}table{width:auto!important;}img{max-width:100%!important;height:auto!important;}a{color:#2563eb;}</style>`;
   if (/<head[^>]*>/i.test(clean)) {
     return clean.replace(/<head([^>]*)>/i, `<head$1>${headInject}`);
   }
