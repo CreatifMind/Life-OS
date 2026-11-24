@@ -221,7 +221,7 @@ export function NewEventModal({
             <button
               type="submit"
               disabled={!title.trim() || isSubmitting}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-medium transition-colors"
+              className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-white hover:bg-zinc-200 disabled:opacity-40 text-zinc-950 text-xs font-medium transition-colors"
             >
               {isSubmitting && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
               <span>{isSubmitting ? 'Saving...' : 'Add to Calendar'}</span>

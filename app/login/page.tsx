@@ -41,16 +41,14 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100 flex items-center justify-center p-4 relative overflow-hidden">
-      <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-96 h-96 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
-
-      <div className="w-full max-w-sm rounded-2xl p-6 md:p-7 bg-zinc-900/80 border border-zinc-800/90 shadow-2xl relative z-10">
+    <div className="min-h-screen bg-[#0A0A0C] text-zinc-100 flex items-center justify-center p-4">
+      <div className="w-full max-w-sm rounded-2xl p-6 md:p-7 bg-[#111114] border border-zinc-800/80 shadow-2xl">
         <div className="flex items-center gap-3 mb-6">
-          <div className="w-10 h-10 rounded-xl bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400">
-            <Sparkles className="w-5 h-5" />
+          <div className="w-9 h-9 rounded-lg bg-white text-zinc-950 flex items-center justify-center">
+            <Sparkles className="w-4 h-4" />
           </div>
           <div>
-            <h1 className="text-base font-semibold text-white tracking-tight">LIFE OS</h1>
+            <h1 className="text-base font-semibold text-white tracking-tight">Life OS</h1>
             <p className="text-xs text-zinc-500">Private Command Center</p>
           </div>
         </div>
@@ -92,7 +90,7 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={isLoading || !password.trim()}
-            className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm font-medium transition-all shadow-lg shadow-indigo-600/20"
+            className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-white hover:bg-zinc-200 disabled:opacity-40 text-zinc-950 text-sm font-medium transition-all"
           >
             {isLoading ? (
               <>

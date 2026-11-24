@@ -103,22 +103,21 @@ export function RemindersWidget({
   };
 
   return (
-    <div className="rounded-2xl p-5 md:p-6 bg-zinc-900/60 border border-zinc-800/80 shadow-lg flex flex-col h-full">
+    <div className="rounded-2xl p-5 bg-[#111114] border border-zinc-800/70 flex flex-col h-full">
       {/* Header */}
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex items-center justify-between mb-3.5">
         <div className="flex items-center gap-2">
-          <CheckSquare className="w-4 h-4 text-amber-400" />
-          <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-300">
-            Apple Reminders
+          <CheckSquare className="w-4 h-4 text-zinc-400" />
+          <h3 className="text-sm font-medium text-white tracking-tight">
+            Reminders
           </h3>
         </div>
         <button
           onClick={onOpenNewTaskModal}
-          className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-medium border border-zinc-700/60 transition-all active:scale-95"
+          className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800/80 transition-colors"
           title="Add task with due date & notes"
         >
-          <Plus className="w-3.5 h-3.5" />
-          <span>Details</span>
+          <Plus className="w-4 h-4" />
         </button>
       </div>
 
@@ -138,15 +137,15 @@ export function RemindersWidget({
             <button
               key={tab.id}
               onClick={() => setFilter(tab.id)}
-              className={`px-2.5 py-1 rounded-full text-[11px] font-medium transition-colors ${
+              className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors ${
                 active
-                  ? 'bg-indigo-600 text-white'
+                  ? 'bg-white text-zinc-950'
                   : isOverdueAlert
-                  ? 'bg-red-500/10 text-red-300 border border-red-500/30 hover:bg-red-500/20'
-                  : 'bg-zinc-950/80 text-zinc-400 border border-zinc-800 hover:text-zinc-200'
+                  ? 'bg-rose-500/10 text-rose-300 border border-rose-500/30 hover:bg-rose-500/20'
+                  : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/60'
               }`}
             >
-              {tab.label} <span className="opacity-75 ml-0.5">{tab.count}</span>
+              {tab.label} <span className="opacity-70 ml-0.5">{tab.count}</span>
             </button>
           );
         })}
@@ -161,12 +160,12 @@ export function RemindersWidget({
             onChange={e => setQuickTitle(e.target.value)}
             placeholder="Add a reminder..."
             disabled={isAdding}
-            className="flex-1 px-3 py-1.5 rounded-lg bg-zinc-950/80 border border-zinc-800 focus:border-indigo-500 focus:outline-none text-xs text-white placeholder:text-zinc-500"
+            className="flex-1 px-3 py-1.5 rounded-lg bg-zinc-950/60 border border-zinc-800/70 focus:border-zinc-500 focus:outline-none text-xs text-white placeholder:text-zinc-600 transition-colors"
           />
           <button
             type="submit"
             disabled={!quickTitle.trim() || isAdding}
-            className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-xs font-medium transition-colors shrink-0"
+            className="px-3 py-1.5 rounded-lg bg-white hover:bg-zinc-200 disabled:opacity-30 text-zinc-950 text-xs font-medium transition-colors shrink-0"
           >
             {isAdding ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Add'}
           </button>

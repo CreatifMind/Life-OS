@@ -87,9 +87,9 @@ export function LifeAssistantDrawer({ onReminderCreated, onEventCreated }: LifeA
       {/* Floating Action Button */}
       <button
         onClick={() => setIsOpen(true)}
-        className="fixed bottom-6 right-6 z-40 flex items-center gap-2.5 px-4 py-3 rounded-full bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-medium text-xs shadow-2xl shadow-indigo-500/30 border border-indigo-400/30 active:scale-95 transition-all group"
+        className="fixed bottom-5 right-5 z-40 flex items-center gap-2 px-4 py-2.5 rounded-full bg-[#16161A]/95 hover:bg-zinc-800 text-white font-medium text-xs shadow-2xl border border-zinc-700/80 backdrop-blur-md active:scale-95 transition-all group"
       >
-        <Sparkles className="w-4 h-4 text-indigo-200 group-hover:rotate-12 transition-transform" />
+        <Sparkles className="w-3.5 h-3.5 text-zinc-300 group-hover:rotate-12 transition-transform" />
         <span>Ask Life OS</span>
       </button>
 
@@ -100,7 +100,7 @@ export function LifeAssistantDrawer({ onReminderCreated, onEventCreated }: LifeA
             {/* Drawer Header */}
             <div className="p-4 border-b border-zinc-800 flex items-center justify-between">
               <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-lg bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 flex items-center justify-center">
+                <div className="w-8 h-8 rounded-lg bg-white text-zinc-950 flex items-center justify-center">
                   <Bot className="w-4 h-4" />
                 </div>
                 <div>
@@ -124,7 +124,7 @@ export function LifeAssistantDrawer({ onReminderCreated, onEventCreated }: LifeA
                   className={`flex gap-2.5 text-xs ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}
                 >
                   {m.role === 'model' && (
-                    <div className="w-6 h-6 rounded-full bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 flex items-center justify-center shrink-0 mt-0.5">
+                    <div className="w-6 h-6 rounded-full bg-zinc-800 text-zinc-200 border border-zinc-700 flex items-center justify-center shrink-0 mt-0.5">
                       <Sparkles className="w-3 h-3" />
                     </div>
                   )}
@@ -132,8 +132,8 @@ export function LifeAssistantDrawer({ onReminderCreated, onEventCreated }: LifeA
                   <div
                     className={`p-3 rounded-2xl max-w-[85%] leading-relaxed whitespace-pre-wrap ${
                       m.role === 'user'
-                        ? 'bg-indigo-600 text-white rounded-br-none'
-                        : 'bg-zinc-900 border border-zinc-800 text-zinc-200 rounded-bl-none'
+                        ? 'bg-white text-zinc-950 font-medium rounded-br-none'
+                        : 'bg-[#111114] border border-zinc-800/80 text-zinc-200 rounded-bl-none'
                     }`}
                   >
                     {m.text}
@@ -185,12 +185,12 @@ export function LifeAssistantDrawer({ onReminderCreated, onEventCreated }: LifeA
                   value={input}
                   onChange={e => setInput(e.target.value)}
                   placeholder="Ask about your schedule, tasks, or emails..."
-                  className="flex-1 px-3.5 py-2.5 rounded-xl bg-zinc-900 border border-zinc-800 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-indigo-500 transition-colors"
+                  className="flex-1 px-3.5 py-2.5 rounded-xl bg-zinc-900 border border-zinc-800 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-zinc-500 transition-colors"
                 />
                 <button
                   type="submit"
                   disabled={isLoading || !input.trim()}
-                  className="p-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white disabled:opacity-50 transition-colors"
+                  className="p-2.5 rounded-xl bg-white hover:bg-zinc-200 text-zinc-950 disabled:opacity-40 transition-colors"
                 >
                   <Send className="w-4 h-4" />
                 </button>

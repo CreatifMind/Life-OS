@@ -24,13 +24,13 @@ export function DailyBriefingCard({ briefing, isLoading }: DailyBriefingCardProp
   const getSourceIcon = (source: string) => {
     switch (source) {
       case 'CALENDAR':
-        return <Calendar className="w-3 h-3 text-blue-400" />;
+        return <Calendar className="w-3 h-3 text-zinc-400" />;
       case 'REMINDER':
-        return <CheckSquare className="w-3 h-3 text-amber-400" />;
+        return <CheckSquare className="w-3 h-3 text-zinc-400" />;
       case 'GMAIL':
-        return <Mail className="w-3 h-3 text-red-400" />;
+        return <Mail className="w-3 h-3 text-zinc-400" />;
       default:
-        return <Target className="w-3 h-3 text-indigo-400" />;
+        return <Target className="w-3 h-3 text-zinc-400" />;
     }
   };
 
@@ -58,63 +58,54 @@ export function DailyBriefingCard({ briefing, isLoading }: DailyBriefingCardProp
 
   if (!briefing && isLoading) {
     return (
-      <div className="rounded-2xl p-6 bg-zinc-900/60 border border-zinc-800 animate-pulse">
-        <div className="h-4 bg-zinc-800 rounded w-1/4 mb-4" />
-        <div className="h-6 bg-zinc-800 rounded w-3/4 mb-6" />
+      <div className="rounded-2xl p-5 bg-[#111114] border border-zinc-800/70 animate-pulse">
+        <div className="h-4 bg-zinc-800/80 rounded w-1/4 mb-3" />
+        <div className="h-6 bg-zinc-800/80 rounded w-2/3 mb-4" />
         <div className="grid md:grid-cols-3 gap-4">
-          <div className="h-24 bg-zinc-850 rounded-xl" />
-          <div className="h-24 bg-zinc-850 rounded-xl" />
-          <div className="h-24 bg-zinc-850 rounded-xl" />
+          <div className="h-16 bg-zinc-900/80 rounded-lg" />
+          <div className="h-16 bg-zinc-900/80 rounded-lg" />
+          <div className="h-16 bg-zinc-900/80 rounded-lg" />
         </div>
       </div>
     );
   }
 
   return (
-    <div className="relative overflow-hidden rounded-2xl p-4 md:p-5 bg-gradient-to-b from-zinc-900/90 via-zinc-900/60 to-zinc-950/80 border border-zinc-800/90 shadow-xl">
-      {/* Decorative subtle ambient glow */}
-      <div className="absolute top-0 right-0 -mr-20 -mt-20 w-72 h-72 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
-
+    <div className="rounded-2xl p-5 bg-[#111114] border border-zinc-800/70">
       {/* Header bar */}
-      <div className="flex flex-wrap items-center justify-between gap-2.5 mb-3">
-        <div className="flex items-center gap-2.5">
-          <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
-            <Sparkles className="w-4 h-4" />
-          </div>
-          <div>
-            <h2 className="text-xs font-semibold uppercase tracking-wider text-indigo-400">
-              AI Daily Briefing
-            </h2>
-            <span className="text-[11px] text-zinc-500">
-              Updated {briefing ? new Date(briefing.generatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '8:00 AM'} MYT
-            </span>
-          </div>
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+        <div className="flex items-center gap-2">
+          <Sparkles className="w-4 h-4 text-zinc-300" />
+          <h2 className="text-sm font-medium text-white tracking-tight">Daily Briefing</h2>
+          <span className="text-xs text-zinc-500">
+            · {briefing ? new Date(briefing.generatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '8:00 AM'} MYT
+          </span>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
           {isLoading && (
-            <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium bg-indigo-500/10 text-indigo-300 border border-indigo-500/20">
+            <span className="flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] font-medium text-zinc-300 bg-zinc-900 border border-zinc-800">
               <RefreshCw className="w-3 h-3 animate-spin" />
-              <span>Updating...</span>
+              <span>Updating</span>
             </span>
           )}
 
           <button
             onClick={handleSpeak}
-            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all ${
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
               isPlayingAudio
-                ? 'bg-indigo-600 text-white animate-pulse'
-                : 'bg-zinc-800/80 hover:bg-zinc-750 text-zinc-300 border border-zinc-700/60'
+                ? 'bg-white text-zinc-950'
+                : 'text-zinc-400 hover:text-white hover:bg-zinc-800/70'
             }`}
             title="Read briefing aloud"
           >
             <Volume2 className="w-3.5 h-3.5" />
-            <span>{isPlayingAudio ? 'Speaking...' : 'Listen'}</span>
+            <span>{isPlayingAudio ? 'Speaking' : 'Listen'}</span>
           </button>
 
           <button
             onClick={() => setIsExpanded(prev => !prev)}
-            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-zinc-800/80 hover:bg-zinc-750 text-zinc-400 hover:text-zinc-200 border border-zinc-700/60 transition-all"
+            className="flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium text-zinc-400 hover:text-white hover:bg-zinc-800/70 transition-colors"
             title={isExpanded ? 'Collapse details' : 'Expand details'}
           >
             {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
@@ -124,59 +115,61 @@ export function DailyBriefingCard({ briefing, isLoading }: DailyBriefingCardProp
       </div>
 
       {/* Headline */}
-      <h3 className="text-base md:text-lg font-medium tracking-tight text-white mb-3 leading-snug">
+      <h3 className="text-base md:text-lg font-medium tracking-tight text-white mb-4 leading-snug">
         {briefing?.headline || 'Reviewing your day...'}
       </h3>
 
-      {/* Compact Merged Top 3 Priorities */}
+      {/* Top 3 Priorities — clean hairline-separated strip */}
       {briefing?.topPriorities && briefing.topPriorities.length > 0 && (
-        <div className="grid md:grid-cols-3 gap-2.5 mb-3">
-          {briefing.topPriorities.slice(0, 3).map(p => (
+        <div className="grid md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-zinc-800/70 border-t border-zinc-800/70 pt-3.5 mb-3.5">
+          {briefing.topPriorities.slice(0, 3).map((p, idx) => (
             <div
               key={p.rank}
-              className="flex items-start gap-2.5 p-2.5 rounded-xl bg-zinc-950/80 border border-zinc-800/80"
+              className={`flex items-start gap-2.5 py-2 md:py-0 ${
+                idx === 0 ? 'md:pr-4' : idx === 1 ? 'md:px-4' : 'md:pl-4'
+              }`}
             >
-              <span className="flex items-center justify-center w-5 h-5 rounded-full bg-indigo-500/15 border border-indigo-500/30 text-[10px] font-bold text-indigo-300 shrink-0 mt-0.5">
-                {p.rank}
+              <span className="text-[11px] font-mono text-zinc-500 mt-0.5 shrink-0">
+                0{p.rank}
               </span>
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-1.5">
-                  <span className="text-xs font-medium text-white truncate">{p.title}</span>
+                  <span className="text-xs font-medium text-zinc-100 truncate">{p.title}</span>
                   <span className="shrink-0" title={p.source}>{getSourceIcon(p.source)}</span>
                 </div>
-                <p className="text-[11px] text-zinc-400 line-clamp-1 mt-0.5">{p.reason}</p>
+                <p className="text-[11px] text-zinc-500 line-clamp-1 mt-0.5">{p.reason}</p>
               </div>
             </div>
           ))}
         </div>
       )}
 
-      {/* Expandable 3 Pillars Overview Grid */}
+      {/* Expandable 3 Pillars — clean hairline-separated columns */}
       {isExpanded && (
-        <div className="grid md:grid-cols-3 gap-3 mb-3">
-          <div className="p-3 rounded-xl bg-zinc-950/60 border border-zinc-800/80">
-            <span className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider block mb-1">
-              Today&apos;s Agenda
+        <div className="grid md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-zinc-800/70 border-t border-zinc-800/70 pt-3.5">
+          <div className="py-2.5 md:py-0 md:pr-4">
+            <span className="text-[11px] font-medium text-zinc-500 block mb-1.5">
+              Agenda
             </span>
             <p className="text-xs text-zinc-300 leading-relaxed whitespace-pre-line">
               {formatBulletText(briefing?.agendaSummary) || 'No scheduled calendar conflicts.'}
             </p>
           </div>
 
-          <div className="p-3 rounded-xl bg-zinc-950/60 border border-zinc-800/80">
-            <span className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider block mb-1">
-              Email Intelligence
+          <div className="py-2.5 md:py-0 md:px-4">
+            <span className="text-[11px] font-medium text-zinc-500 block mb-1.5">
+              Inbox
             </span>
             <p className="text-xs text-zinc-300 leading-relaxed whitespace-pre-line">
               {formatBulletText(briefing?.emailHighlights) || 'Priority correspondence reviewed.'}
             </p>
           </div>
 
-          <div className="p-3 rounded-xl bg-zinc-950/60 border border-zinc-800/80">
-            <span className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider block mb-1">
-              Strategic Focus
+          <div className="py-2.5 md:py-0 md:pl-4">
+            <span className="text-[11px] font-medium text-zinc-500 block mb-1.5">
+              Focus
             </span>
-            <p className="text-xs text-zinc-300 leading-relaxed whitespace-pre-line">
+            <p className="text-xs text-zinc-200 leading-relaxed whitespace-pre-line">
               {briefing?.suggestedPreparation || 'Review obligations and focus on primary tasks.'}
             </p>
           </div>
@@ -185,11 +178,11 @@ export function DailyBriefingCard({ briefing, isLoading }: DailyBriefingCardProp
 
       {/* Overdue / Warning banner (if any) */}
       {briefing?.warningsOrOverdue && briefing.warningsOrOverdue.length > 0 && (
-        <div className="flex items-start gap-2 p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-300 text-xs">
+        <div className="mt-3.5 flex items-start gap-2 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-300 text-xs">
           <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5 text-amber-400" />
           <div>
-            <span className="font-semibold">Attention: </span>
-            {briefing.warningsOrOverdue.join(' • ')}
+            <span className="font-medium">Attention: </span>
+            {briefing.warningsOrOverdue.join(' · ')}
           </div>
         </div>
       )}

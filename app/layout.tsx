@@ -30,7 +30,7 @@ export default function RootLayout({
         <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
         <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png" />
       </head>
-      <body className="min-h-screen bg-[#09090b] text-zinc-100 selection:bg-zinc-800 selection:text-white">
+      <body className="min-h-screen bg-[#0A0A0C] text-zinc-100 selection:bg-zinc-800 selection:text-white">
         {children}
         <script
           dangerouslySetInnerHTML={{

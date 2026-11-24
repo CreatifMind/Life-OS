@@ -241,7 +241,7 @@ export default function DashboardPage() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#09090b] text-zinc-100 overflow-x-hidden">
+    <div className="min-h-screen flex flex-col bg-[#0A0A0C] text-zinc-100 overflow-x-hidden">
       {/* Top Header */}
       <Header
         onRefresh={handleFullSync}
@@ -251,7 +251,7 @@ export default function DashboardPage() {
       />
 
       {/* Mobile Navigation Tabs (< md) */}
-      <div className="md:hidden sticky top-[61px] z-20 bg-zinc-950/90 backdrop-blur-md border-b border-zinc-800/80 px-4 py-2 flex items-center gap-1.5 overflow-x-auto">
+      <div className="md:hidden sticky top-[57px] z-20 bg-[#0A0A0C]/90 backdrop-blur-md border-b border-zinc-800/60 px-4 py-2 flex items-center gap-1.5 overflow-x-auto">
         {(
           [
             { id: 'briefing', label: 'Briefing' },
@@ -263,17 +263,17 @@ export default function DashboardPage() {
                 return new Date(e.endTime || e.startTime).getTime() >= startOfToday.getTime();
               }).length})`,
             },
-            { id: 'tasks', label: `Tasks (${reminders.filter(r => !r.isCompleted).length})` },
-            { id: 'mail', label: `Mail (${emails.length})` },
+            { id: 'tasks', label: `Reminders (${reminders.filter(r => !r.isCompleted).length})` },
+            { id: 'mail', label: `Inbox (${emails.length})` },
           ] as Array<{ id: MobileTab; label: string }>
         ).map(tab => (
           <button
             key={tab.id}
             onClick={() => setMobileTab(tab.id)}
-            className={`px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors ${
+            className={`px-3 py-1.5 rounded-md text-xs font-medium whitespace-nowrap transition-colors ${
               mobileTab === tab.id
-                ? 'bg-indigo-600 text-white'
-                : 'bg-zinc-900 text-zinc-400 hover:text-zinc-200 border border-zinc-800'
+                ? 'bg-white text-zinc-950'
+                : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900'
             }`}
           >
             {tab.label}

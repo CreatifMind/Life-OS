@@ -119,22 +119,22 @@ export function CalendarTimeline({ events, isLoading, onOpenNewEventModal }: Cal
   }, {} as Record<string, { label: string; dateStr: string; items: ExpandedTimelineItem[] }>);
 
   return (
-    <div className="rounded-2xl p-5 md:p-6 bg-zinc-900/60 border border-zinc-800/80 shadow-lg flex flex-col h-full">
+    <div className="rounded-2xl p-5 bg-[#111114] border border-zinc-800/70 flex flex-col h-full">
       {/* Header bar with Tab Toggle */}
-      <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
-        <div className="flex items-center gap-2">
-          <CalendarIcon className="w-4 h-4 text-blue-400" />
-          <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-300">
-            Calendar Schedule
+      <div className="flex items-center justify-between mb-4 gap-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <CalendarIcon className="w-4 h-4 text-zinc-400 shrink-0" />
+          <h3 className="text-sm font-medium text-white tracking-tight truncate">
+            Schedule
           </h3>
         </div>
 
-        <div className="flex items-center gap-2 text-xs">
-          <div className="flex items-center p-0.5 rounded-lg bg-zinc-950 border border-zinc-800 text-[11px]">
+        <div className="flex items-center gap-1.5 text-xs shrink-0">
+          <div className="flex items-center p-0.5 rounded-lg bg-zinc-950 border border-zinc-800/80 text-[11px]">
             <button
               onClick={() => setShowPast(false)}
               className={`px-2 py-0.5 rounded-md font-medium transition-all ${
-                !showPast ? 'bg-zinc-800 text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-300'
+                !showPast ? 'bg-white text-zinc-950' : 'text-zinc-500 hover:text-zinc-300'
               }`}
             >
               Upcoming ({uniqueUpcomingCount})
@@ -142,7 +142,7 @@ export function CalendarTimeline({ events, isLoading, onOpenNewEventModal }: Cal
             <button
               onClick={() => setShowPast(true)}
               className={`px-2 py-0.5 rounded-md font-medium transition-all ${
-                showPast ? 'bg-zinc-800 text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-300'
+                showPast ? 'bg-white text-zinc-950' : 'text-zinc-500 hover:text-zinc-300'
               }`}
             >
               Past ({uniquePastCount})
@@ -151,11 +151,10 @@ export function CalendarTimeline({ events, isLoading, onOpenNewEventModal }: Cal
           {onOpenNewEventModal && (
             <button
               onClick={onOpenNewEventModal}
-              className="flex items-center gap-1 px-2 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-[11px] font-medium border border-zinc-700/60 transition-all active:scale-95"
+              className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800/80 transition-colors"
               title="Add event to Apple Calendar"
             >
-              <Plus className="w-3 h-3" />
-              <span>Event</span>
+              <Plus className="w-4 h-4" />
             </button>
           )}
         </div>
@@ -189,18 +188,17 @@ export function CalendarTimeline({ events, isLoading, onOpenNewEventModal }: Cal
                 {/* Date Header Pill */}
                 <div className="flex items-center gap-2 pt-1">
                   <div
-                    className={`flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-[11px] font-semibold tracking-wider uppercase ${
+                    className={`flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium ${
                       isTodayGroup
-                        ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 shadow-sm'
+                        ? 'bg-white text-zinc-950'
                         : isTomorrowGroup
-                        ? 'bg-blue-500/15 text-blue-300 border border-blue-500/30'
-                        : 'bg-zinc-800/80 text-zinc-400 border border-zinc-700/50'
+                        ? 'bg-zinc-800 text-zinc-200'
+                        : 'text-zinc-500'
                     }`}
                   >
-                    {isTodayGroup && <Sparkles className="w-3 h-3 text-indigo-400" />}
                     <span>{group.label}</span>
                     {group.label !== group.dateStr && (
-                      <span className="text-zinc-500 font-normal">• {group.dateStr}</span>
+                      <span className={isTodayGroup ? 'text-zinc-600 font-normal' : 'text-zinc-500 font-normal'}>· {group.dateStr}</span>
                     )}
                   </div>
                   <div className="flex-1 h-px bg-zinc-800/60" />
@@ -214,7 +212,7 @@ export function CalendarTimeline({ events, isLoading, onOpenNewEventModal }: Cal
                       <div
                         key={item.instanceId}
                         className={`py-3 px-2 rounded-lg transition-colors hover:bg-zinc-800/30 ${
-                          isTodayGroup ? 'border-l-2 border-l-indigo-500 pl-3 rounded-l-none' : ''
+                          isTodayGroup ? 'border-l-2 border-l-white/80 pl-3 rounded-l-none' : ''
                         }`}
                       >
                         <div className="flex items-start justify-between gap-2 mb-1">
