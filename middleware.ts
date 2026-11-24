@@ -4,6 +4,7 @@ import { COOKIE_NAME, verifySessionToken } from '@/lib/auth';
 const PUBLIC_PATHS = [
   '/login',
   '/api/auth/login',
+  '/api/auth/callback/google',
   '/api/reminders/sync',
   '/api/cron/briefing',
   '/manifest.json',

@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Sparkles, X, Send, Bot, User, Loader2 } from 'lucide-react';
+import { Sparkles, X, Send, Bot, User, Loader2, RotateCcw } from 'lucide-react';
 
 import { CalendarEvent, ReminderTask } from '@/lib/types';
 
@@ -39,6 +39,24 @@ export function LifeAssistantDrawer({ onReminderCreated, onEventCreated }: LifeA
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
   }, [messages, isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setIsOpen(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isOpen]);
+
+  const handleClearChat = () => {
+    setMessages([
+      {
+        role: 'model',
+        text: 'Good day! I have live access to your Apple Calendar, Reminders, and Gmail. What would you like to check or prepare?',
+      },
+    ]);
+  };
 
   const handleSend = async (textToSend?: string) => {
     const q = (textToSend || input).trim();
@@ -95,8 +113,14 @@ export function LifeAssistantDrawer({ onReminderCreated, onEventCreated }: LifeA
 
       {/* Slide-Over Drawer */}
       {isOpen && (
-        <div className="fixed inset-0 z-50 flex justify-end bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="w-full max-w-md h-full bg-zinc-950 border-l border-zinc-800 flex flex-col shadow-2xl">
+        <div
+          onClick={() => setIsOpen(false)}
+          className="fixed inset-0 z-50 flex justify-end bg-black/65 backdrop-blur-sm animate-in fade-in duration-200"
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            className="w-full max-w-md h-full bg-[#0A0A0C] border-l border-zinc-800 flex flex-col shadow-2xl"
+          >
             {/* Drawer Header */}
             <div className="p-4 border-b border-zinc-800 flex items-center justify-between">
               <div className="flex items-center gap-2.5">
@@ -104,16 +128,28 @@ export function LifeAssistantDrawer({ onReminderCreated, onEventCreated }: LifeA
                   <Bot className="w-4 h-4" />
                 </div>
                 <div>
-                  <h3 className="text-sm font-semibold text-white">Life OS Assistant</h3>
+                  <h3 className="text-sm font-medium text-white">Life OS Assistant</h3>
                   <p className="text-[10px] text-zinc-500">Live Grounded Intelligence</p>
                 </div>
               </div>
-              <button
-                onClick={() => setIsOpen(false)}
-                className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
-              >
-                <X className="w-4 h-4" />
-              </button>
+              <div className="flex items-center gap-1">
+                {messages.length > 1 && (
+                  <button
+                    onClick={handleClearChat}
+                    className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
+                    title="Clear conversation"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                  </button>
+                )}
+                <button
+                  onClick={() => setIsOpen(false)}
+                  className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
+                  title="Close (Esc)"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
             </div>
 
             {/* Messages Scroll Area */}

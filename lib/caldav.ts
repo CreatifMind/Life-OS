@@ -207,60 +207,37 @@ export async function fetchLiveReminders(): Promise<ReminderTask[]> {
   }
 }
 
-export async function createAppleReminder(title: string, listName?: string, dueDate?: string, notes?: string): Promise<string> {
-  const { reminderLists } = await discoverCollections();
-  const targetList = (listName && reminderLists.find(l => l.name.toLowerCase() === listName.toLowerCase())) || reminderLists[0];
-  if (!targetList) throw new Error('No Apple Reminders list found.');
-
-  const testUid = `lifeos-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
-  const itemUrl = targetList.url.endsWith('/') ? `${targetList.url}${testUid}.ics` : `${targetList.url}/${testUid}.ics`;
-  const timestamp = new Date().toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
-
-  let vtodo = `BEGIN:VCALENDAR
-VERSION:2.0
-PRODID:-//LifeOS//CalDAV//EN
-BEGIN:VTODO
-UID:${testUid}
-DTSTAMP:${timestamp}
-SUMMARY:${title}
-STATUS:NEEDS-ACTION
-`;
-
-  if (dueDate) {
-    const formattedDue = new Date(dueDate).toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
-    vtodo += `DUE:${formattedDue}\n`;
-  }
-  if (notes) {
-    vtodo += `DESCRIPTION:${notes.replace(/\n/g, '\\n')}\n`;
-  }
-
-  vtodo += `END:VTODO\nEND:VCALENDAR`;
-
-  const res = await davRequest(itemUrl, 'PUT', {
-    'Content-Type': 'text/calendar; charset=utf-8',
-  }, vtodo);
-
-  if (res.status !== 201 && res.status !== 204 && res.status !== 200) {
-    throw new Error(`Failed to create reminder: HTTP ${res.status}`);
-  }
-
-  return testUid;
-}
-
 export async function markAppleReminderComplete(taskUid: string, isCompleted: boolean = true, _title?: string): Promise<void> {
   await updateSyncedReminderStatus(taskUid, isCompleted);
 }
+
+const APP_TIMEZONE = process.env.APP_TIMEZONE || 'Asia/Kuala_Lumpur';
 
 function toUtcIcsTimestamp(iso: string): string {
   return new Date(iso).toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
 }
 
-function toIcsDateOnly(iso: string): string {
+function toMytYmd(iso: string): string {
   const d = new Date(iso);
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}${m}${day}`;
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: APP_TIMEZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(d); // YYYY-MM-DD in MYT
+}
+
+function addOneDayYmd(ymd: string): string {
+  const [y, m, d] = ymd.split('-').map(Number);
+  const next = new Date(Date.UTC(y, m - 1, d + 1));
+  const ny = next.getUTCFullYear();
+  const nm = String(next.getUTCMonth() + 1).padStart(2, '0');
+  const nd = String(next.getUTCDate()).padStart(2, '0');
+  return `${ny}${nm}${nd}`;
+}
+
+function toIcsDateOnly(iso: string): string {
+  return toMytYmd(iso).replace(/-/g, '');
 }
 
 export async function createAppleCalendarEvent(input: {
@@ -302,11 +279,19 @@ export async function createAppleCalendarEvent(input: {
 
   let dtLines = '';
   if (input.isAllDay) {
-    const startDate = toIcsDateOnly(input.startTime);
-    const endDateObj = new Date(input.endTime || input.startTime);
-    endDateObj.setDate(endDateObj.getDate() + 1); // DTEND is exclusive for all-day VEVENT
-    const endDate = toIcsDateOnly(endDateObj.toISOString());
-    dtLines = `DTSTART;VALUE=DATE:${startDate}\r\nDTEND;VALUE=DATE:${endDate}`;
+    const startYmd = toMytYmd(input.startTime);
+    const endYmd = toMytYmd(input.endTime || input.startTime);
+    const endD = new Date(input.endTime || input.startTime);
+    const endTimeMyt = endD.toLocaleTimeString('en-GB', {
+      timeZone: APP_TIMEZONE,
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    });
+    const alreadyExclusive = endYmd > startYmd && endTimeMyt === '00:00';
+    const startIcs = startYmd.replace(/-/g, '');
+    const endIcs = alreadyExclusive ? endYmd.replace(/-/g, '') : addOneDayYmd(endYmd);
+    dtLines = `DTSTART;VALUE=DATE:${startIcs}\r\nDTEND;VALUE=DATE:${endIcs}`;
   } else {
     dtLines = `DTSTART:${toUtcIcsTimestamp(input.startTime)}\r\nDTEND:${toUtcIcsTimestamp(input.endTime)}`;
   }

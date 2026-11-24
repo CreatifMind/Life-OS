@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Sparkles, Volume2, RefreshCw, AlertTriangle, ChevronDown, ChevronUp, Calendar, CheckSquare, Mail, Target } from 'lucide-react';
 import { DailyBriefing } from '@/lib/types';
 
@@ -34,6 +34,14 @@ export function DailyBriefingCard({ briefing, isLoading }: DailyBriefingCardProp
     }
   };
 
+  useEffect(() => {
+    return () => {
+      if (typeof window !== 'undefined' && window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+      }
+    };
+  }, []);
+
   const handleSpeak = () => {
     if (!briefing || !window.speechSynthesis) return;
 
@@ -43,9 +51,10 @@ export function DailyBriefingCard({ briefing, isLoading }: DailyBriefingCardProp
       return;
     }
 
-    const textToRead = `${briefing.headline}. Here are your priorities for today: ${briefing.topPriorities
-      .map(p => `Priority ${p.rank}: ${p.title}. ${p.reason}`)
-      .join(' ')}. Schedule: ${briefing.agendaSummary}. Communication: ${briefing.emailHighlights}`;
+    const cleanForSpeech = (s?: string) => (s || '').replace(/[•\-*]+/g, ' ').replace(/\s+/g, ' ').trim();
+    const textToRead = `${cleanForSpeech(briefing.headline)}. Here are your priorities for today: ${briefing.topPriorities
+      .map(p => `Priority ${p.rank}: ${cleanForSpeech(p.title)}. ${cleanForSpeech(p.reason)}`)
+      .join(' ')}. Schedule: ${cleanForSpeech(briefing.agendaSummary)}. Communication: ${cleanForSpeech(briefing.emailHighlights)}`;
 
     const utterance = new SpeechSynthesisUtterance(textToRead);
     utterance.rate = 1.05;

@@ -3,16 +3,27 @@ import { fetchLiveCalendarEvents, fetchLiveReminders } from '@/lib/caldav';
 import { fetchRecentEmails, sendBriefingEmail } from '@/lib/gmail';
 import { generateDailyBriefing } from '@/lib/gemini';
 import { saveBriefingToDb, logSyncAudit } from '@/lib/db';
+import { COOKIE_NAME, verifySessionToken } from '@/lib/auth';
 
 export const maxDuration = 30; // Max execution timeout for Vercel Hobby serverless
 
 export async function GET(req: NextRequest) {
   try {
-    // 1. Verify Vercel Cron Secret (if configured)
+    // 1. Verify Vercel Cron Secret / Sync Secret / Dashboard Session (when configured)
     const authHeader = req.headers.get('authorization');
-    const cronSecret = process.env.CRON_SECRET;
-    if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
-      return NextResponse.json({ error: 'Unauthorized cron invocation' }, { status: 401 });
+    const querySecret = req.nextUrl.searchParams.get('secret');
+    const cronSecret = process.env.CRON_SECRET || process.env.SYNC_SECRET;
+    if (cronSecret) {
+      const hasSecret =
+        authHeader === `Bearer ${cronSecret}` ||
+        querySecret === cronSecret ||
+        (process.env.SYNC_SECRET && (authHeader === `Bearer ${process.env.SYNC_SECRET}` || querySecret === process.env.SYNC_SECRET));
+      const dashPass = process.env.DASHBOARD_PASSWORD;
+      const hasSession = dashPass ? await verifySessionToken(req.cookies.get(COOKIE_NAME)?.value, dashPass) : false;
+
+      if (!hasSecret && !hasSession) {
+        return NextResponse.json({ error: 'Unauthorized cron invocation' }, { status: 401 });
+      }
     }
 
     console.log('[CRON] Starting automated 8:00 AM MYT Daily Briefing generation...');

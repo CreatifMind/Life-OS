@@ -1,10 +1,37 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { saveSyncedReminders, getSyncedReminders, getPendingReminders, clearPendingReminders } from '@/lib/db';
 import { ReminderTask } from '@/lib/types';
+import { COOKIE_NAME, verifySessionToken } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 export const maxDuration = 30;
+
+async function isAuthorizedSyncRequest(req: NextRequest): Promise<boolean> {
+  const syncSecret = process.env.SYNC_SECRET;
+  if (!syncSecret) return true;
+
+  const authHeader = req.headers.get('authorization');
+  const querySecret = req.nextUrl.searchParams.get('secret');
+  const headerSecret = req.headers.get('x-sync-secret');
+
+  if (
+    authHeader === `Bearer ${syncSecret}` ||
+    querySecret === syncSecret ||
+    headerSecret === syncSecret
+  ) {
+    return true;
+  }
+
+  // Also allow authenticated dashboard sessions
+  const dashPass = process.env.DASHBOARD_PASSWORD;
+  if (dashPass) {
+    const cookie = req.cookies.get(COOKIE_NAME)?.value;
+    if (await verifySessionToken(cookie, dashPass)) return true;
+  }
+
+  return false;
+}
 
 function generateTaskUid(title: string, listName: string): string {
   const clean = `${listName}-${title}`.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-');
@@ -13,6 +40,10 @@ function generateTaskUid(title: string, listName: string): string {
 
 export async function GET(req: NextRequest) {
   try {
+    if (!(await isAuthorizedSyncRequest(req))) {
+      return NextResponse.json({ success: false, error: 'Unauthorized sync request' }, { status: 401 });
+    }
+
     const format = req.nextUrl.searchParams.get('format');
     const claim = req.nextUrl.searchParams.get('claim') === '1';
 
@@ -67,6 +98,10 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
+    if (!(await isAuthorizedSyncRequest(req))) {
+      return NextResponse.json({ success: false, error: 'Unauthorized sync request' }, { status: 401 });
+    }
+
     const contentType = req.headers.get('content-type') || '';
     let rawItems: any[] = [];
     let createdPendingUids: string[] = [];

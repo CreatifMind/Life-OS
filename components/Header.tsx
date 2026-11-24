@@ -45,7 +45,12 @@ export function Header({ onRefresh, isSyncing, health, userName }: HeaderProps) 
   }, []);
 
   const getGreeting = () => {
-    const hour = new Date().getHours();
+    const hourStr = new Date().toLocaleTimeString('en-GB', {
+      timeZone: 'Asia/Kuala_Lumpur',
+      hour: '2-digit',
+      hour12: false,
+    });
+    const hour = parseInt(hourStr, 10);
     if (hour < 12) return 'Good morning';
     if (hour < 18) return 'Good afternoon';
     return 'Good evening';
