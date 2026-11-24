@@ -256,6 +256,76 @@ function extractBodyFromPayload(payload: any): string {
   return '';
 }
 
+function extractHtmlFromPayload(payload: any): string {
+  if (!payload) return '';
+  if (payload.mimeType === 'text/html' && payload.body?.data) {
+    return decodeBase64Url(payload.body.data);
+  }
+  if (Array.isArray(payload.parts)) {
+    for (const part of payload.parts) {
+      if (part.mimeType === 'text/html' && part.body?.data) {
+        return decodeBase64Url(part.body.data);
+      }
+      if (part.parts) {
+        const nested = extractHtmlFromPayload(part);
+        if (nested) return nested;
+      }
+    }
+  }
+  return '';
+}
+
+export interface EmailAttachment {
+  attachmentId: string;
+  filename: string;
+  mimeType: string;
+  size: number;
+  contentId?: string;
+}
+
+function extractAttachmentsFromPayload(payload: any, acc: EmailAttachment[] = []): EmailAttachment[] {
+  if (!payload) return acc;
+  if (payload.body?.attachmentId) {
+    const partHeaders = payload.headers || [];
+    const cidHeader = partHeaders.find((h: any) => h.name.toLowerCase() === 'content-id')?.value || '';
+    const contentId = cidHeader.replace(/^<|>$/g, '').trim() || undefined;
+    acc.push({
+      attachmentId: payload.body.attachmentId,
+      filename: payload.filename || (contentId ? `${contentId}.bin` : 'attachment'),
+      mimeType: payload.mimeType || 'application/octet-stream',
+      size: payload.body.size || 0,
+      contentId,
+    });
+  }
+  if (Array.isArray(payload.parts)) {
+    for (const part of payload.parts) {
+      extractAttachmentsFromPayload(part, acc);
+    }
+  }
+  return acc;
+}
+
+function sanitizeEmailHtml(html: string, rawMessageId: string, accountEmail: string, attachments: EmailAttachment[]): string {
+  let clean = html
+    .replace(/<script[\s\S]*?<\/script>/gi, '')
+    .replace(/\son\w+="[^"]*"/gi, '')
+    .replace(/\son\w+='[^']*'/gi, '');
+
+  // Rewrite inline cid: image references to our authenticated attachment proxy route
+  for (const att of attachments) {
+    if (att.contentId) {
+      const proxyUrl = `/api/gmail/attachment?messageId=${encodeURIComponent(rawMessageId)}&attachmentId=${encodeURIComponent(att.attachmentId)}&account=${encodeURIComponent(accountEmail)}&mimeType=${encodeURIComponent(att.mimeType)}&filename=${encodeURIComponent(att.filename)}`;
+      clean = clean.replace(new RegExp(`cid:${att.contentId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'gi'), proxyUrl);
+    }
+  }
+
+  const headInject = `<base target="_blank" /><style>body{margin:0;padding:16px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:14px;line-height:1.5;color:#18181b;background:#ffffff;word-wrap:break-word;overflow-wrap:break-word;}img{max-width:100%!important;height:auto!important;}a{color:#2563eb;}</style>`;
+  if (/<head[^>]*>/i.test(clean)) {
+    return clean.replace(/<head([^>]*)>/i, `<head$1>${headInject}`);
+  }
+  return `<!DOCTYPE html><html><head><meta charset="utf-8" />${headInject}</head><body>${clean}</body></html>`;
+}
+
 export interface EmailDetail {
   id: string;
   threadId: string;
@@ -267,6 +337,8 @@ export interface EmailDetail {
   date: string;
   messageIdHeader?: string;
   body: string;
+  htmlBody?: string;
+  attachments: EmailAttachment[];
   snippet: string;
 }
 
@@ -297,6 +369,10 @@ export async function fetchEmailDetail(rawId: string, accountEmail?: string): Pr
   }
 
   const body = extractBodyFromPayload(msg.payload) || msg.snippet || '(Empty message)';
+  const allAttachments = extractAttachmentsFromPayload(msg.payload);
+  const rawHtml = extractHtmlFromPayload(msg.payload);
+  const htmlBody = rawHtml ? sanitizeEmailHtml(rawHtml, rawId, email, allAttachments) : undefined;
+  const visibleAttachments = allAttachments.filter(a => a.filename && (!a.contentId || !rawHtml.includes(`cid:${a.contentId}`)));
 
   return {
     id: rawId,
@@ -309,8 +385,32 @@ export async function fetchEmailDetail(rawId: string, accountEmail?: string): Pr
     date: getHeader('Date') || new Date().toISOString(),
     messageIdHeader: getHeader('Message-ID') || undefined,
     body,
+    htmlBody,
+    attachments: visibleAttachments,
     snippet: msg.snippet || '',
   };
+}
+
+export async function fetchEmailAttachment(
+  rawMessageId: string,
+  attachmentId: string,
+  accountEmail?: string
+): Promise<Buffer> {
+  const { cleanId, inferredAccount } = stripAccountPrefix(rawMessageId);
+  const { accessToken } = await getAccessTokenForAccount(accountEmail || inferredAccount);
+
+  const res = await fetch(
+    `https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(cleanId)}/attachments/${encodeURIComponent(attachmentId)}`,
+    { headers: { Authorization: `Bearer ${accessToken}` } }
+  );
+
+  const data = await res.json();
+  if (data.error || !data.data) {
+    throw new Error(`Gmail attachment error: ${data.error?.message || 'Empty attachment'}`);
+  }
+
+  const normalized = String(data.data).replace(/-/g, '+').replace(/_/g, '/');
+  return Buffer.from(normalized, 'base64');
 }
 
 export async function modifyEmailLabels(

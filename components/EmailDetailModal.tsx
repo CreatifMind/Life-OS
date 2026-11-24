@@ -1,8 +1,15 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { X, Mail, Check, Archive, CheckSquare, Send, Sparkles, Loader2 } from 'lucide-react';
+import { X, Mail, Check, Archive, CheckSquare, Send, Sparkles, Loader2, Paperclip } from 'lucide-react';
 import { EmailThread } from '@/lib/types';
+
+interface EmailAttachment {
+  attachmentId: string;
+  filename: string;
+  mimeType: string;
+  size: number;
+}
 
 interface EmailDetail {
   id: string;
@@ -15,7 +22,35 @@ interface EmailDetail {
   date: string;
   messageIdHeader?: string;
   body: string;
+  htmlBody?: string;
+  attachments?: EmailAttachment[];
   snippet: string;
+}
+
+function formatBytes(bytes: number): string {
+  if (!bytes) return '';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function renderLinkifiedText(text: string): React.ReactNode {
+  const parts = text.split(/(https?:\/\/[^\s<>()]+)/gi);
+  return parts.map((part, i) =>
+    /^https?:\/\//i.test(part) ? (
+      <a
+        key={i}
+        href={part}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-sky-400 underline hover:text-sky-300 break-all"
+      >
+        {part}
+      </a>
+    ) : (
+      <React.Fragment key={i}>{part}</React.Fragment>
+    )
+  );
 }
 
 interface EmailDetailModalProps {
@@ -262,15 +297,46 @@ export function EmailDetailModal({
         )}
 
         {/* Email Body */}
-        <div className="flex-1 overflow-y-auto p-4 md:p-5">
+        <div className="flex-1 overflow-y-auto flex flex-col">
           {isLoading ? (
             <div className="flex items-center gap-2 text-xs text-zinc-500 py-8 justify-center">
-              <Loader2 className="w-4 h-4 animate-spin text-indigo-400" />
+              <Loader2 className="w-4 h-4 animate-spin text-zinc-300" />
               <span>Loading full message...</span>
             </div>
+          ) : detail?.htmlBody ? (
+            <iframe
+              title={detail.subject || 'Email content'}
+              srcDoc={detail.htmlBody}
+              sandbox="allow-popups allow-popups-to-escape-sandbox"
+              className="w-full flex-1 min-h-[340px] bg-white border-0"
+            />
           ) : (
-            <div className="text-xs md:text-sm text-zinc-200 leading-relaxed whitespace-pre-wrap break-words font-sans">
-              {detail?.body || email.snippet}
+            <div className="p-4 md:p-5 text-xs md:text-sm text-zinc-200 leading-relaxed whitespace-pre-wrap break-words font-sans">
+              {renderLinkifiedText(detail?.body || email.snippet)}
+            </div>
+          )}
+
+          {/* Clickable Attachments */}
+          {detail?.attachments && detail.attachments.length > 0 && (
+            <div className="px-4 md:px-5 py-3 border-t border-zinc-800/80 bg-[#111114] flex flex-wrap gap-2">
+              {detail.attachments.map(att => {
+                const href = `/api/gmail/attachment?messageId=${encodeURIComponent(detail.id)}&attachmentId=${encodeURIComponent(att.attachmentId)}&account=${encodeURIComponent(detail.accountEmail)}&mimeType=${encodeURIComponent(att.mimeType)}&filename=${encodeURIComponent(att.filename)}`;
+                return (
+                  <a
+                    key={att.attachmentId}
+                    href={href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-xs text-zinc-200 transition-colors"
+                  >
+                    <Paperclip className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
+                    <span className="truncate max-w-[180px]">{att.filename}</span>
+                    {att.size > 0 && (
+                      <span className="text-[10px] text-zinc-500 font-mono">{formatBytes(att.size)}</span>
+                    )}
+                  </a>
+                );
+              })}
             </div>
           )}
         </div>
