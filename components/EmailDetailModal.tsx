@@ -328,7 +328,7 @@ export function EmailDetailModal({
         )}
 
         {/* Email Body */}
-        <div className="flex-1 overflow-y-auto overflow-x-hidden flex flex-col">
+        <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden flex flex-col">
           {isLoading ? (
             <div className="flex items-center gap-2 text-xs text-zinc-500 py-12 justify-center">
               <Loader2 className="w-4 h-4 animate-spin text-zinc-300" />
@@ -338,8 +338,8 @@ export function EmailDetailModal({
             <iframe
               title={detail.subject || 'Email content'}
               srcDoc={detail.htmlBody}
-              sandbox="allow-popups allow-popups-to-escape-sandbox"
-              className="w-full flex-1 min-h-[380px] bg-white border-0"
+              sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation"
+              className="w-full h-full flex-1 min-h-[380px] bg-white border-0"
             />
           ) : (
             <div className="p-5 text-sm text-zinc-200 leading-relaxed whitespace-pre-wrap break-words font-sans">
