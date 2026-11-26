@@ -4,7 +4,7 @@
  */
 
 import { CalendarEvent, ReminderTask } from './types';
-import { getSyncedReminders, updateSyncedReminderStatus } from './db';
+import { getAppSetting, getSyncedReminders, saveAppSetting, updateSyncedReminderStatus } from './db';
 
 const APPLE_ID = process.env.APPLE_ID || '';
 const APPLE_APP_SPECIFIC_PASSWORD = process.env.APPLE_APP_SPECIFIC_PASSWORD || '';
@@ -50,15 +50,43 @@ function resolveUrl(base: string, relative: string): string {
   }
 }
 
+const CALDAV_CACHE_KEY = 'CALDAV_COLLECTIONS_CACHE';
+const MEMORY_CACHE_TTL_MS = 1000 * 60 * 30;
+const DB_CACHE_TTL_MS = 1000 * 60 * 60 * 6;
+
 let cachedCollections: {
   calendars: Array<{ name: string; url: string }>;
   reminderLists: Array<{ name: string; url: string }>;
   timestamp: number;
 } | null = null;
 
-export async function discoverCollections() {
-  if (cachedCollections && Date.now() - cachedCollections.timestamp < 1000 * 60 * 30) {
+export async function invalidateCollectionsCache(): Promise<void> {
+  cachedCollections = null;
+  await saveAppSetting(CALDAV_CACHE_KEY, '').catch(() => {});
+}
+
+export async function discoverCollections(forceRefresh = false) {
+  if (!forceRefresh && cachedCollections && Date.now() - cachedCollections.timestamp < MEMORY_CACHE_TTL_MS) {
     return cachedCollections;
+  }
+
+  if (!forceRefresh) {
+    try {
+      const raw = await getAppSetting(CALDAV_CACHE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (
+          parsed &&
+          Array.isArray(parsed.calendars) &&
+          parsed.calendars.length > 0 &&
+          typeof parsed.timestamp === 'number' &&
+          Date.now() - parsed.timestamp < DB_CACHE_TTL_MS
+        ) {
+          cachedCollections = parsed;
+          return cachedCollections!;
+        }
+      }
+    } catch {}
   }
 
   // 1. Principal discovery
@@ -141,6 +169,7 @@ export async function discoverCollections() {
   }
 
   cachedCollections = { calendars, reminderLists, timestamp: Date.now() };
+  void saveAppSetting(CALDAV_CACHE_KEY, JSON.stringify(cachedCollections)).catch(() => {});
   return cachedCollections;
 }
 
@@ -235,7 +264,7 @@ function parseIcsDate(rawValue: string, rawParams: string = ''): { iso: string; 
   }
 }
 
-export async function fetchLiveCalendarEvents(daysPast = 14, daysFuture = 60): Promise<CalendarEvent[]> {
+export async function fetchLiveCalendarEvents(daysPast = 14, daysFuture = 60, allowRediscover = true): Promise<CalendarEvent[]> {
   const { calendars } = await discoverCollections();
 
   const now = new Date();
@@ -259,12 +288,17 @@ export async function fetchLiveCalendarEvents(daysPast = 14, daysFuture = 60): P
   </c:filter>
 </c:calendar-query>`;
 
+  let sawStaleUrl = false;
   const results = await Promise.allSettled(
     calendars.map(async cal => {
       const res = await davRequest(cal.url, 'REPORT', {
         'Depth': '1',
         'Content-Type': 'application/xml; charset=utf-8',
       }, reportBody);
+
+      if (res.status === 401 || res.status === 404 || res.status === 410) {
+        sawStaleUrl = true;
+      }
 
       const events: CalendarEvent[] = [];
       const eventBlocks = [...res.text.matchAll(/BEGIN:VEVENT[\s\S]*?END:VEVENT/gi)];
@@ -318,6 +352,12 @@ export async function fetchLiveCalendarEvents(daysPast = 14, daysFuture = 60): P
       return events;
     })
   );
+
+  if (sawStaleUrl && allowRediscover) {
+    await invalidateCollectionsCache();
+    await discoverCollections(true);
+    return fetchLiveCalendarEvents(daysPast, daysFuture, false);
+  }
 
   const allEvents: CalendarEvent[] = [];
   for (const r of results) {
@@ -460,12 +500,26 @@ export async function createAppleCalendarEvent(input: {
     'END:VCALENDAR',
   ];
 
-  const putRes = await davRequest(
+  let putRes = await davRequest(
     itemUrl,
     'PUT',
     { 'Content-Type': 'text/calendar; charset=utf-8' },
     lines.join('\r\n')
   );
+
+  if (putRes.status === 401 || putRes.status === 404 || putRes.status === 410) {
+    await invalidateCollectionsCache();
+    const refreshed = await discoverCollections(true);
+    const refreshedCal =
+      refreshed.calendars.find(c => c.name.toLowerCase() === targetCal.name.toLowerCase()) || targetCal;
+    const retryUrl = refreshedCal.url.endsWith('/') ? `${refreshedCal.url}${uid}.ics` : `${refreshedCal.url}/${uid}.ics`;
+    putRes = await davRequest(
+      retryUrl,
+      'PUT',
+      { 'Content-Type': 'text/calendar; charset=utf-8' },
+      lines.join('\r\n')
+    );
+  }
 
   if (putRes.status >= 400) {
     throw new Error(`Apple Calendar rejected event (HTTP ${putRes.status})`);

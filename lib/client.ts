@@ -8,7 +8,23 @@ export async function safeFetchJson<T = any>(
   input: RequestInfo | URL,
   init?: RequestInit
 ): Promise<T> {
-  const res = await fetch(input, init);
+  const signal =
+    init?.signal ??
+    (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
+      ? AbortSignal.timeout(26000)
+      : undefined);
+
+  let res: Response;
+  try {
+    res = await fetch(input, { ...init, signal });
+  } catch (err: any) {
+    const name = err?.name || '';
+    const msg = String(err?.message || '');
+    if (name === 'TimeoutError' || name === 'AbortError' || /timeout|aborted/i.test(msg)) {
+      throw new Error('Request timed out waiting for the server. Tap Retry to try again.');
+    }
+    throw new Error('Connection dropped before the server responded. Tap Retry to send again.');
+  }
 
   if (
     res.status === 401 &&

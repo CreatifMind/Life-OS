@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Sparkles, X, Send, Bot, User, Loader2, RotateCcw, Check, AlertCircle, Info } from 'lucide-react';
+import { Sparkles, X, Send, Bot, User, Loader2, RotateCcw, RotateCw, Check, AlertCircle, Info } from 'lucide-react';
 
 import { AssistantActionReceipt, CalendarEvent, ReminderTask } from '@/lib/types';
 import { getClientTimeZoneInfo, safeFetchJson } from '@/lib/client';
@@ -11,6 +11,7 @@ interface Message {
   text: string;
   receipts?: AssistantActionReceipt[];
   isError?: boolean;
+  retryPrompt?: string;
 }
 
 interface LifeAssistantDrawerProps {
@@ -61,18 +62,26 @@ export function LifeAssistantDrawer({ onRemindersMutated, onEventsMutated }: Lif
     ]);
   };
 
-  const handleSend = async (textToSend?: string) => {
+  const handleSend = async (
+    textToSend?: string,
+    options?: { isRetry?: boolean; replaceIndex?: number }
+  ) => {
     const q = (textToSend || input).trim();
     if (!q || isLoading) return;
 
-    const userMsg: Message = { role: 'user', text: q };
-    setMessages(prev => [...prev, userMsg]);
-    setInput('');
+    const baseMessages =
+      options?.isRetry && typeof options.replaceIndex === 'number'
+        ? messages.filter((_, i) => i !== options.replaceIndex)
+        : [...messages, { role: 'user' as const, text: q }];
+
+    setMessages(baseMessages);
+    if (!options?.isRetry) setInput('');
     setIsLoading(true);
 
     try {
-      const history = messages
-        .slice(1)
+      // Build clean history excluding greeting, errors, and the current user message
+      const historySource = baseMessages.slice(1, -1);
+      const history = historySource
         .filter(m => !m.isError)
         .slice(-12)
         .map(m => ({ role: m.role, text: m.text }));
@@ -128,13 +137,23 @@ export function LifeAssistantDrawer({ onRemindersMutated, onEventsMutated }: Lif
       } else {
         setMessages(prev => [
           ...prev,
-          { role: 'model', text: `Sorry, I encountered an issue: ${data.error || 'Empty response'}`, isError: true },
+          {
+            role: 'model',
+            text: `Sorry, I encountered an issue: ${data.error || 'Empty response'}`,
+            isError: true,
+            retryPrompt: q,
+          },
         ]);
       }
     } catch (err: any) {
       setMessages(prev => [
         ...prev,
-        { role: 'model', text: err?.message || 'Connection error. Please try again.', isError: true },
+        {
+          role: 'model',
+          text: err?.message || 'Connection dropped before the server responded. Tap Retry to send again.',
+          isError: true,
+          retryPrompt: q,
+        },
       ]);
     } finally {
       setIsLoading(false);
@@ -218,6 +237,20 @@ export function LifeAssistantDrawer({ onRemindersMutated, onEventsMutated }: Lif
                     >
                       {m.text}
                     </div>
+
+                    {m.isError && m.retryPrompt && (
+                      <div className="pl-0.5">
+                        <button
+                          type="button"
+                          disabled={isLoading}
+                          onClick={() => handleSend(m.retryPrompt, { isRetry: true, replaceIndex: idx })}
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-[11px] font-medium text-zinc-200 disabled:opacity-40 transition-colors"
+                        >
+                          <RotateCw className="w-3 h-3" />
+                          <span>Retry</span>
+                        </button>
+                      </div>
+                    )}
 
                     {m.receipts && m.receipts.length > 0 && (
                       <div className="flex flex-wrap gap-1.5 pl-0.5">

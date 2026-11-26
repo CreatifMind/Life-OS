@@ -19,19 +19,99 @@ interface GeminiGenerateResponse {
   error?: { code: number; message: string; status: string };
 }
 
-// Ordered by verified availability & speed (avoids hanging gemini-3.1-flash-lite & 503 gemini-3.8-flash)
-const MODELS = [
-  'gemini-3.5-flash-lite',
-  'gemini-3.5-flash',
-  'gemini-3-flash-preview',
-  'gemini-3.6-flash',
-];
+const PRIMARY_MODEL = 'gemini-3.5-flash-lite';
+const HEDGE_MODEL = 'gemini-3-flash-preview';
+const LAST_RESORT_MODEL = 'gemini-3.6-flash';
+const HEDGE_DELAY_MS = 3500;
 
 function stripMarkdownJsonFences(raw: string): string {
   return raw
     .replace(/^```(?:json)?\s*/i, '')
     .replace(/```\s*$/i, '')
     .trim();
+}
+
+async function trySingleModel(
+  model: string,
+  prompt: string,
+  responseMimeType: 'application/json' | 'text/plain',
+  timeoutMs: number,
+  externalSignal?: AbortSignal
+): Promise<string> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(new Error(`${model}: Timed out after ${timeoutMs}ms`)), timeoutMs);
+  const onExternalAbort = () => controller.abort(externalSignal?.reason || new Error(`${model}: Cancelled`));
+
+  if (externalSignal) {
+    if (externalSignal.aborted) {
+      clearTimeout(timeoutId);
+      throw new Error(`${model}: Cancelled`);
+    }
+    externalSignal.addEventListener('abort', onExternalAbort, { once: true });
+  }
+
+  try {
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`;
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: controller.signal,
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: {
+          temperature: 0.2,
+          maxOutputTokens: 4096,
+          responseMimeType,
+        },
+      }),
+    });
+
+    const rawBody = await res.text();
+    let data: GeminiGenerateResponse | null = null;
+    try {
+      data = JSON.parse(rawBody);
+    } catch {
+      throw new Error(`${model}: Non-JSON HTTP ${res.status}`);
+    }
+
+    if (!res.ok || data?.error) {
+      throw new Error(`${model}: ${data?.error?.message || `HTTP ${res.status}`}`);
+    }
+
+    const cand = data?.candidates?.[0];
+    if (!cand) {
+      throw new Error(`${model}: Empty candidate list`);
+    }
+
+    if (cand.finishReason === 'MAX_TOKENS') {
+      throw new Error(`${model}: Response truncated (MAX_TOKENS)`);
+    }
+
+    const text = (cand.content?.parts || [])
+      .filter(p => !p.thought && typeof p.text === 'string')
+      .map(p => p.text!)
+      .join('')
+      .trim();
+
+    if (!text) {
+      throw new Error(`${model}: Empty text output (finishReason=${cand.finishReason || 'unknown'})`);
+    }
+
+    if (responseMimeType === 'application/json') {
+      try {
+        JSON.parse(stripMarkdownJsonFences(text));
+      } catch {
+        throw new Error(`${model}: Malformed JSON output`);
+      }
+    }
+
+    return text;
+  } finally {
+    clearTimeout(timeoutId);
+    if (externalSignal) {
+      externalSignal.removeEventListener('abort', onExternalAbort);
+    }
+  }
 }
 
 export async function callGemini(
@@ -42,77 +122,64 @@ export async function callGemini(
     throw new Error('GEMINI_API_KEY is not configured in environment');
   }
 
-  let lastError = '';
+  const hedgeAc = new AbortController();
+  const errors: string[] = [];
 
-  for (const model of MODELS) {
+  const runAttempt = (model: string, timeoutMs: number) =>
+    trySingleModel(model, prompt, responseMimeType, timeoutMs, hedgeAc.signal);
+
+  const primaryP = runAttempt(PRIMARY_MODEL, 7000);
+  primaryP.catch(() => {});
+
+  const timerOutcome = await new Promise<'hedge_due' | { ok: string } | { err: string }>(resolve => {
+    const timer = setTimeout(() => resolve('hedge_due'), HEDGE_DELAY_MS);
+    primaryP.then(
+      text => {
+        clearTimeout(timer);
+        resolve({ ok: text });
+      },
+      err => {
+        clearTimeout(timer);
+        resolve({ err: err?.message || 'Primary failed' });
+      }
+    );
+  });
+
+  if (timerOutcome !== 'hedge_due') {
+    if ('ok' in timerOutcome) {
+      return timerOutcome.ok;
+    }
+    errors.push(timerOutcome.err);
     try {
-      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`;
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        signal: AbortSignal.timeout(10000),
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: {
-            temperature: 0.2,
-            maxOutputTokens: 4096,
-            responseMimeType,
-          },
-        }),
-      });
-
-      const rawBody = await res.text();
-      let data: GeminiGenerateResponse | null = null;
-      try {
-        data = JSON.parse(rawBody);
-      } catch {
-        lastError = `${model}: Non-JSON HTTP ${res.status}`;
-        continue;
-      }
-
-      if (!res.ok || data?.error) {
-        lastError = `${model}: ${data?.error?.message || `HTTP ${res.status}`}`;
-        continue;
-      }
-
-      const cand = data?.candidates?.[0];
-      if (!cand) {
-        lastError = `${model}: Empty candidate list`;
-        continue;
-      }
-
-      if (cand.finishReason === 'MAX_TOKENS') {
-        lastError = `${model}: Response truncated (MAX_TOKENS)`;
-        continue;
-      }
-
-      const text = (cand.content?.parts || [])
-        .filter(p => !p.thought && typeof p.text === 'string')
-        .map(p => p.text!)
-        .join('')
-        .trim();
-
-      if (!text) {
-        lastError = `${model}: Empty text output (finishReason=${cand.finishReason || 'unknown'})`;
-        continue;
-      }
-
-      if (responseMimeType === 'application/json') {
-        try {
-          JSON.parse(stripMarkdownJsonFences(text));
-        } catch {
-          lastError = `${model}: Malformed JSON output`;
-          continue;
-        }
-      }
-
-      return text;
+      return await runAttempt(HEDGE_MODEL, 7000);
     } catch (err: any) {
-      lastError = `${model}: ${err?.message || 'Request failed'}`;
+      errors.push(err?.message || 'Hedge failed');
+    }
+  } else {
+    const hedgeP = runAttempt(HEDGE_MODEL, 7000);
+    hedgeP.catch(err => {
+      errors.push(err?.message || 'Hedge failed');
+    });
+    primaryP.catch(err => {
+      errors.push(err?.message || 'Primary failed');
+    });
+
+    try {
+      const winner = await Promise.any([primaryP, hedgeP]);
+      hedgeAc.abort();
+      return winner;
+    } catch {
+      // Both hedged models failed; proceed to last resort
     }
   }
 
-  throw new Error(`All Gemini models failed: ${lastError}`);
+  try {
+    return await trySingleModel(LAST_RESORT_MODEL, prompt, responseMimeType, 5000);
+  } catch (err: any) {
+    errors.push(err?.message || 'Last-resort model failed');
+  }
+
+  throw new Error(`All Gemini models failed: ${errors.join(' | ')}`);
 }
 
 export async function callGeminiJson<T = any>(prompt: string): Promise<T> {
