@@ -1,30 +1,16 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { X, Calendar, Clock, MapPin, Trash2, Pencil, Loader2, AlignLeft } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { X, Calendar, Clock, MapPin, Trash2, Pencil, Loader2, AlignLeft, Repeat } from 'lucide-react';
 import { CalendarEvent } from '@/lib/types';
-
-function toMytDateInput(iso: string): string {
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return '';
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Kuala_Lumpur',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(d);
-}
-
-function toMytTimeInput(iso: string): string {
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return '09:00';
-  return d.toLocaleTimeString('en-GB', {
-    timeZone: 'Asia/Kuala_Lumpur',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  });
-}
+import {
+  getClientTimeZoneInfo,
+  getEventAllDayRange,
+  parseYmdLocal,
+  toLocalDateInput,
+  toLocalIsoWithOffset,
+  toLocalTimeInput,
+} from '@/lib/client';
 
 interface EventDetailModalProps {
   event: CalendarEvent | null;
@@ -34,6 +20,8 @@ interface EventDetailModalProps {
     title: string;
     startTime: string;
     endTime: string;
+    startDate?: string;
+    endDate?: string;
     isAllDay: boolean;
     location?: string;
     description?: string;
@@ -53,6 +41,7 @@ export function EventDetailModal({
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [title, setTitle] = useState('');
   const [date, setDate] = useState('');
+  const [endDate, setEndDate] = useState('');
   const [startHour, setStartHour] = useState('09:00');
   const [endHour, setEndHour] = useState('10:00');
   const [isAllDay, setIsAllDay] = useState(false);
@@ -61,16 +50,38 @@ export function EventDetailModal({
   const [calendarName, setCalendarName] = useState('');
   const [isBusy, setIsBusy] = useState(false);
   const [error, setError] = useState('');
+  const [tzLabel, setTzLabel] = useState('MYT');
+  const initializedEventIdRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!event) return;
+    setTzLabel(getClientTimeZoneInfo().tzLabel);
+  }, []);
+
+  useEffect(() => {
+    if (!event) {
+      initializedEventIdRef.current = null;
+      return;
+    }
+    if (initializedEventIdRef.current === event.id) return;
+    initializedEventIdRef.current = event.id;
+
     setIsEditing(false);
     setConfirmDelete(false);
     setError('');
     setTitle(event.title);
-    setDate(toMytDateInput(event.startTime));
-    setStartHour(toMytTimeInput(event.startTime));
-    setEndHour(toMytTimeInput(event.endTime || event.startTime));
+    if (event.isAllDay) {
+      const range = getEventAllDayRange(event);
+      setDate(range.startYmd);
+      setEndDate(range.endYmd);
+      setStartHour('09:00');
+      setEndHour('10:00');
+    } else {
+      const sYmd = toLocalDateInput(event.startTime);
+      setDate(sYmd);
+      setEndDate(sYmd);
+      setStartHour(toLocalTimeInput(event.startTime) || '09:00');
+      setEndHour(toLocalTimeInput(event.endTime || event.startTime) || '10:00');
+    }
     setIsAllDay(Boolean(event.isAllDay));
     setLocation(event.location || '');
     setDescription(event.description || '');
@@ -88,12 +99,17 @@ export function EventDetailModal({
 
   if (!event) return null;
 
-  const isReadOnlyCal = /holiday|birthday|siri/i.test(event.calendarName || '');
+  const isReadOnlyCal = /holiday|birthday|siri/i.test(event.calendarName || '') || Boolean(event.isRecurring);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!title.trim() || isBusy) return;
-    if (!isAllDay && endHour <= startHour) {
+    if (!title.trim() || isBusy || event.isRecurring) return;
+    if (isAllDay) {
+      if (endDate && endDate < date) {
+        setError('End date cannot be before start date.');
+        return;
+      }
+    } else if (endHour <= startHour) {
       setError('End time must be after start time.');
       return;
     }
@@ -101,17 +117,20 @@ export function EventDetailModal({
     setIsBusy(true);
     setError('');
     try {
+      const effectiveEndDate = endDate && endDate >= date ? endDate : date;
       const startIso = isAllDay
-        ? `${date}T00:00:00+08:00`
-        : `${date}T${startHour}:00+08:00`;
+        ? toLocalIsoWithOffset(date, '00:00')
+        : toLocalIsoWithOffset(date, startHour);
       const endIso = isAllDay
-        ? `${date}T23:59:00+08:00`
-        : `${date}T${endHour}:00+08:00`;
+        ? toLocalIsoWithOffset(effectiveEndDate, '23:59')
+        : toLocalIsoWithOffset(date, endHour);
 
       await onUpdate(event, {
         title: title.trim(),
         startTime: startIso,
         endTime: endIso,
+        startDate: isAllDay ? date : undefined,
+        endDate: isAllDay ? effectiveEndDate : undefined,
         isAllDay,
         location: location.trim() || undefined,
         description: description.trim() || undefined,
@@ -126,7 +145,7 @@ export function EventDetailModal({
   };
 
   const handleDelete = async () => {
-    if (isBusy) return;
+    if (isBusy || event.isRecurring) return;
     setIsBusy(true);
     setError('');
     try {
@@ -139,24 +158,33 @@ export function EventDetailModal({
   };
 
   const formatDisplayRange = () => {
+    if (event.isAllDay) {
+      const { startYmd, endYmd } = getEventAllDayRange(event);
+      const sD = parseYmdLocal(startYmd);
+      const eD = parseYmdLocal(endYmd);
+      if (endYmd > startYmd) {
+        const diffDays = Math.round((eD.getTime() - sD.getTime()) / 86400000) + 1;
+        const sStr = sD.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+        const eStr = eD.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+        return `${sStr} – ${eStr} · ${diffDays} Days`;
+      }
+      return `${sD.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'short', year: 'numeric' })} · All Day`;
+    }
+
     const startD = new Date(event.startTime);
     const endD = new Date(event.endTime || event.startTime);
-    const dateLabel = startD.toLocaleDateString('en-MY', {
-      timeZone: 'Asia/Kuala_Lumpur',
+    const dateLabel = startD.toLocaleDateString([], {
       weekday: 'long',
       day: 'numeric',
       month: 'short',
       year: 'numeric',
     });
-    if (event.isAllDay) return `${dateLabel} · All Day`;
-    const sTime = startD.toLocaleTimeString('en-MY', {
-      timeZone: 'Asia/Kuala_Lumpur',
+    const sTime = startD.toLocaleTimeString([], {
       hour: 'numeric',
       minute: '2-digit',
       hour12: true,
     });
-    const eTime = endD.toLocaleTimeString('en-MY', {
-      timeZone: 'Asia/Kuala_Lumpur',
+    const eTime = endD.toLocaleTimeString([], {
       hour: 'numeric',
       minute: '2-digit',
       hour12: true,
@@ -196,10 +224,16 @@ export function EventDetailModal({
         {!isEditing ? (
           <div className="p-5 space-y-4">
             <div className="space-y-2.5 text-xs">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <span className="px-2 py-0.5 rounded-full bg-zinc-900 border border-zinc-800 text-[10px] font-medium text-zinc-300 uppercase tracking-wider">
                   {event.calendarName}
                 </span>
+                {event.isRecurring && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-zinc-900 border border-zinc-800 text-[10px] font-medium text-zinc-400 uppercase tracking-wider">
+                    <Repeat className="w-2.5 h-2.5" />
+                    Recurring
+                  </span>
+                )}
               </div>
 
               <div className="flex items-start gap-2 text-zinc-300">
@@ -228,7 +262,11 @@ export function EventDetailModal({
               </p>
             )}
 
-            {!isReadOnlyCal && (
+            {event.isRecurring ? (
+              <div className="pt-3 border-t border-zinc-800/70 text-[11px] text-zinc-500">
+                Recurring event — edit or delete this series in Apple Calendar.
+              </div>
+            ) : !isReadOnlyCal ? (
               <div className="flex items-center justify-between gap-2 pt-3 border-t border-zinc-800/70">
                 {!confirmDelete ? (
                   <button
@@ -267,7 +305,7 @@ export function EventDetailModal({
                   <span>Edit</span>
                 </button>
               </div>
-            )}
+            ) : null}
           </div>
         ) : (
           <form onSubmit={handleSave} className="p-5 space-y-3.5">
@@ -285,16 +323,39 @@ export function EventDetailModal({
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-xs font-medium text-zinc-400 mb-1">Date</label>
+                <label className="block text-xs font-medium text-zinc-400 mb-1">
+                  {isAllDay ? 'Start Date' : 'Date'}
+                </label>
                 <input
                   type="date"
                   value={date}
-                  onChange={e => setDate(e.target.value)}
+                  onChange={e => {
+                    const nextStart = e.target.value;
+                    setDate(nextStart);
+                    if (!endDate || endDate < nextStart) setEndDate(nextStart);
+                    setError('');
+                  }}
                   required
                   className="w-full px-3 py-2 rounded-xl bg-zinc-950 border border-zinc-800 focus:border-zinc-500 focus:outline-none text-xs text-white"
                 />
               </div>
-              {calList.length > 0 && (
+
+              {isAllDay ? (
+                <div>
+                  <label className="block text-xs font-medium text-zinc-400 mb-1">End Date</label>
+                  <input
+                    type="date"
+                    value={endDate || date}
+                    min={date}
+                    onChange={e => {
+                      setEndDate(e.target.value);
+                      setError('');
+                    }}
+                    required
+                    className="w-full px-3 py-2 rounded-xl bg-zinc-950 border border-zinc-800 focus:border-zinc-500 focus:outline-none text-xs text-white"
+                  />
+                </div>
+              ) : calList.length > 0 ? (
                 <div>
                   <label className="block text-xs font-medium text-zinc-400 mb-1">Calendar</label>
                   <select
@@ -309,16 +370,37 @@ export function EventDetailModal({
                     ))}
                   </select>
                 </div>
-              )}
+              ) : null}
             </div>
+
+            {isAllDay && calList.length > 0 && (
+              <div>
+                <label className="block text-xs font-medium text-zinc-400 mb-1">Calendar</label>
+                <select
+                  value={calendarName}
+                  onChange={e => setCalendarName(e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl bg-zinc-950 border border-zinc-800 focus:border-zinc-500 focus:outline-none text-xs text-white"
+                >
+                  {calList.map(c => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
 
             <label className="flex items-center gap-2 text-xs text-zinc-300 cursor-pointer select-none">
               <input
                 type="checkbox"
                 checked={isAllDay}
                 onChange={e => {
-                  setIsAllDay(e.target.checked);
-                  if (e.target.checked) setError('');
+                  const next = e.target.checked;
+                  setIsAllDay(next);
+                  if (next) {
+                    if (!endDate || endDate < date) setEndDate(date);
+                    setError('');
+                  }
                 }}
                 className="rounded border-zinc-700 bg-zinc-950 text-white"
               />
@@ -328,7 +410,7 @@ export function EventDetailModal({
             {!isAllDay && (
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-medium text-zinc-400 mb-1">Start (MYT)</label>
+                  <label className="block text-xs font-medium text-zinc-400 mb-1">Start ({tzLabel})</label>
                   <input
                     type="time"
                     value={startHour}
@@ -341,7 +423,7 @@ export function EventDetailModal({
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-zinc-400 mb-1">End (MYT)</label>
+                  <label className="block text-xs font-medium text-zinc-400 mb-1">End ({tzLabel})</label>
                   <input
                     type="time"
                     value={endHour}

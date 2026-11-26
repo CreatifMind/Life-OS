@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Header } from '@/components/Header';
 import { DailyBriefingCard } from '@/components/DailyBriefingCard';
 import { CalendarTimeline } from '@/components/CalendarTimeline';
@@ -13,6 +13,7 @@ import { NewEventModal } from '@/components/NewEventModal';
 import { EventDetailModal } from '@/components/EventDetailModal';
 import { LifeAssistantDrawer } from '@/components/LifeAssistantDrawer';
 import { CalendarEvent, ReminderTask, EmailThread, DailyBriefing, SyncHealthStatus } from '@/lib/types';
+import { getClientTimeZoneInfo, getUpcomingEventIds, safeFetchJson } from '@/lib/client';
 
 type MobileTab = 'briefing' | 'schedule' | 'tasks' | 'mail';
 
@@ -32,6 +33,7 @@ export default function DashboardPage() {
   const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null);
   const [selectedReminder, setSelectedReminder] = useState<ReminderTask | null>(null);
   const [authBanner, setAuthBanner] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
 
   // Modal state
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -39,14 +41,20 @@ export default function DashboardPage() {
   const [modalTitle, setModalTitle] = useState('');
   const [modalNotes, setModalNotes] = useState('');
 
+  // Refs so on-demand briefing generation reuses already-synced state without re-fetching CalDAV/Gmail
+  const latestDataRef = useRef({ events, reminders, emails });
+  useEffect(() => {
+    latestDataRef.current = { events, reminders, emails };
+  }, [events, reminders, emails]);
+
   // 1. Initial Load & Synchronization
   const handleSyncData = useCallback(async () => {
     try {
       setIsSyncing(true);
-      const res = await fetch('/api/sync');
-      const json = await res.json();
+      setSyncError(null);
+      const json = await safeFetchJson('/api/sync');
 
-      if (json.success && json.data) {
+      if (json.data) {
         setEvents(json.data.events || []);
         setReminders(json.data.reminders || []);
         setEmails(json.data.emails || []);
@@ -55,55 +63,88 @@ export default function DashboardPage() {
         setLastSyncTime(nowIso);
         lastSyncMsRef.current = Date.now();
       }
-    } catch (err) {
-      console.error('Sync failed:', err);
+    } catch (err: any) {
+      setSyncError(err?.message || 'Sync failed. Please try again.');
     } finally {
       setIsSyncing(false);
     }
   }, []);
 
   // 2. Load cached Briefing or force AI generation with Gemini
-  const handleFetchBriefing = useCallback(async (force: boolean = false) => {
+  const handleFetchBriefing = useCallback(async (
+    force: boolean = false,
+    overrideData?: { events: CalendarEvent[]; reminders: ReminderTask[]; emails: EmailThread[] }
+  ) => {
     try {
       setIsBriefingLoading(true);
-      const res = await fetch('/api/briefing/generate', {
+      const { timeZone } = getClientTimeZoneInfo();
+      const payload = overrideData || (
+        latestDataRef.current.events.length > 0 ||
+        latestDataRef.current.reminders.length > 0 ||
+        latestDataRef.current.emails.length > 0
+          ? latestDataRef.current
+          : null
+      );
+
+      const json = await safeFetchJson('/api/briefing/generate', {
         method: force ? 'POST' : 'GET',
+        ...(force
+          ? {
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                timeZone,
+                ...(payload || {}),
+              }),
+            }
+          : {}),
       });
-      const json = await res.json();
-      if (json.success && json.briefing) {
+
+      if (json.briefing) {
         setBriefing(json.briefing);
       }
-    } catch (err) {
-      console.error('Briefing fetch/generation error:', err);
+    } catch (err: any) {
+      setSyncError(err?.message || 'Failed to update Daily Briefing.');
     } finally {
       setIsBriefingLoading(false);
     }
   }, []);
 
-  // 3. Unified Sync Action: Syncs all integrations AND regenerates AI Briefing together
+  // 3. Unified Sync Action (single-pass: fetches /api/sync once and passes that data directly to briefing generator)
   const handleFullSync = useCallback(async () => {
     setIsSyncing(true);
     setIsBriefingLoading(true);
+    setSyncError(null);
     try {
-      const res = await fetch('/api/sync');
-      const json = await res.json();
+      const json = await safeFetchJson('/api/sync');
+      const nextEvents = json.data?.events || [];
+      const nextReminders = json.data?.reminders || [];
+      const nextEmails = json.data?.emails || [];
 
-      if (json.success && json.data) {
-        setEvents(json.data.events || []);
-        setReminders(json.data.reminders || []);
-        setEmails(json.data.emails || []);
+      if (json.data) {
+        setEvents(nextEvents);
+        setReminders(nextReminders);
+        setEmails(nextEmails);
         setHealth(json.data.health);
         setLastSyncTime(json.data.health?.lastSync || new Date().toISOString());
         lastSyncMsRef.current = Date.now();
       }
 
-      const briefingRes = await fetch('/api/briefing/generate', { method: 'POST' });
-      const briefingJson = await briefingRes.json();
-      if (briefingJson.success && briefingJson.briefing) {
+      const { timeZone } = getClientTimeZoneInfo();
+      const briefingJson = await safeFetchJson('/api/briefing/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          events: nextEvents,
+          reminders: nextReminders,
+          emails: nextEmails,
+          timeZone,
+        }),
+      });
+      if (briefingJson.briefing) {
         setBriefing(briefingJson.briefing);
       }
-    } catch (err) {
-      console.error('Unified full sync failed:', err);
+    } catch (err: any) {
+      setSyncError(err?.message || 'Full sync failed. Please try again.');
     } finally {
       setIsSyncing(false);
       setIsBriefingLoading(false);
@@ -132,14 +173,20 @@ export default function DashboardPage() {
     handleFetchBriefing(false);
   }, [handleSyncData, handleFetchBriefing]);
 
-  // Quiet background auto-refresh (regenerates everything on tab focus after 5m, or every 15m)
+  // Quiet background auto-refresh (regenerates on focus / iOS PWA visibility resume after 5m, or every 15m)
   useEffect(() => {
-    const onFocus = () => {
+    const maybeSync = () => {
       if (Date.now() - lastSyncMsRef.current > 5 * 60 * 1000) {
         handleFullSync();
       }
     };
-    window.addEventListener('focus', onFocus);
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        maybeSync();
+      }
+    };
+    window.addEventListener('focus', maybeSync);
+    document.addEventListener('visibilitychange', onVisibility);
     const interval = setInterval(() => {
       if (document.visibilityState === 'visible') {
         handleFullSync();
@@ -147,46 +194,53 @@ export default function DashboardPage() {
     }, 15 * 60 * 1000);
 
     return () => {
-      window.removeEventListener('focus', onFocus);
+      window.removeEventListener('focus', maybeSync);
+      document.removeEventListener('visibilitychange', onVisibility);
       clearInterval(interval);
     };
   }, [handleFullSync]);
 
-  // Toggle Reminder State (Two-Way Sync)
+  // Toggle Reminder State (Two-Way Sync with Undo restoration fallback)
   const handleToggleTask = async (uid: string, nextStatus: boolean) => {
+    const target = reminders.find(r => r.uid === uid || r.id === uid);
     setReminders(prev =>
-      prev.map(t => (t.uid === uid ? { ...t, isCompleted: nextStatus } : t))
+      prev.map(t => (t.uid === uid || t.id === uid ? { ...t, isCompleted: nextStatus } : t))
     );
 
     try {
-      const res = await fetch('/api/reminders', {
+      const json = await safeFetchJson('/api/reminders', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ uid, isCompleted: nextStatus }),
+        body: JSON.stringify({
+          uid,
+          isCompleted: nextStatus,
+          title: target?.title,
+          listName: target?.listName,
+          dueDate: target?.dueDate,
+          notes: target?.notes,
+        }),
       });
-      if (!res.ok) {
-        throw new Error('Failed to update Apple Reminder');
+      if (json.restoredTask) {
+        setReminders(prev => [
+          json.restoredTask,
+          ...prev.filter(r => r.uid !== uid && r.id !== uid),
+        ]);
       }
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      setSyncError(err?.message || 'Failed to update Apple Reminder');
       setReminders(prev =>
-        prev.map(t => (t.uid === uid ? { ...t, isCompleted: !nextStatus } : t))
+        prev.map(t => (t.uid === uid || t.id === uid ? { ...t, isCompleted: !nextStatus } : t))
       );
     }
   };
 
   // Create New Task (queued for Mac EventKit two-way sync)
   const handleCreateTask = async (title: string, dueDate?: string, notes?: string) => {
-    const res = await fetch('/api/reminders', {
+    const json = await safeFetchJson('/api/reminders', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ title, dueDate, notes }),
     });
-
-    const json = await res.json();
-    if (!res.ok || !json.success) {
-      throw new Error(json.error || 'Failed to save reminder');
-    }
     if (json.uid) {
       const newTask: ReminderTask = json.task || {
         id: json.uid,
@@ -198,8 +252,9 @@ export default function DashboardPage() {
         dueDate,
         notes,
       };
-      setReminders(prev => [newTask, ...prev]);
-      handleFetchBriefing(true);
+      const nextReminders = [newTask, ...reminders];
+      setReminders(nextReminders);
+      handleFetchBriefing(true, { events, reminders: nextReminders, emails });
     }
   };
 
@@ -208,35 +263,32 @@ export default function DashboardPage() {
     title: string;
     startTime: string;
     endTime: string;
+    startDate?: string;
+    endDate?: string;
     isAllDay: boolean;
     location?: string;
     calendarName?: string;
   }) => {
-    const res = await fetch('/api/calendar', {
+    const json = await safeFetchJson('/api/calendar', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
-    const json = await res.json();
-    if (!res.ok || !json.success) {
-      throw new Error(json.error || 'Failed to create event');
-    }
     if (json.event) {
-      setEvents(prev =>
-        [...prev, json.event].sort(
-          (a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime()
-        )
+      const nextEvents = [...events, json.event].sort(
+        (a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime()
       );
-      handleFetchBriefing(true);
+      setEvents(nextEvents);
+      handleFetchBriefing(true, { events: nextEvents, reminders, emails });
     }
   };
 
   // Update Existing Apple Reminder (in-place in Life OS + Mac EventKit sync)
   const handleUpdateTask = async (
     oldReminder: ReminderTask,
-    updates: { title: string; dueDate?: string; notes?: string }
+    updates: { title: string; dueDate?: string; clearDueDate?: boolean; notes?: string; clearNotes?: boolean }
   ) => {
-    const res = await fetch('/api/reminders', {
+    const json = await safeFetchJson('/api/reminders', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -244,73 +296,71 @@ export default function DashboardPage() {
         title: updates.title,
         listName: oldReminder.listName,
         dueDate: updates.dueDate,
+        clearDueDate: updates.clearDueDate,
         notes: updates.notes,
+        clearNotes: updates.clearNotes,
       }),
     });
-    const json = await res.json();
-    if (!res.ok || !json.success) {
-      throw new Error(json.error || 'Failed to update reminder');
-    }
     if (json.task) {
-      setReminders(prev => [
+      const nextReminders = [
         json.task,
-        ...prev.filter(
+        ...reminders.filter(
           r => r.uid !== oldReminder.uid && r.title.trim().toLowerCase() !== oldReminder.title.trim().toLowerCase()
         ),
-      ]);
-      handleFetchBriefing(true);
+      ];
+      setReminders(nextReminders);
+      handleFetchBriefing(true, { events, reminders: nextReminders, emails });
     }
   };
 
-  // Update Existing Apple Calendar Event via CalDAV
+  // Update Existing Apple Calendar Event via CalDAV (non-destructive)
   const handleUpdateEvent = async (
     oldEvent: CalendarEvent,
     payload: {
       title: string;
       startTime: string;
       endTime: string;
+      startDate?: string;
+      endDate?: string;
       isAllDay: boolean;
       location?: string;
       description?: string;
       calendarName?: string;
     }
   ) => {
-    const res = await fetch('/api/calendar', {
+    const json = await safeFetchJson('/api/calendar', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         id: oldEvent.id,
         oldTitle: oldEvent.title,
+        isRecurring: oldEvent.isRecurring,
         ...payload,
       }),
     });
-    const json = await res.json();
-    if (!res.ok || !json.success) {
-      throw new Error(json.error || 'Failed to update event');
-    }
     if (json.event) {
-      setEvents(prev =>
-        [...prev.filter(e => e.id !== oldEvent.id), json.event].sort(
-          (a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime()
-        )
+      const nextEvents = [...events.filter(e => e.id !== oldEvent.id), json.event].sort(
+        (a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime()
       );
-      handleFetchBriefing(true);
+      setEvents(nextEvents);
+      handleFetchBriefing(true, { events: nextEvents, reminders, emails });
     }
   };
 
   // Delete Apple Calendar Event via CalDAV
   const handleDeleteEvent = async (eventToDelete: CalendarEvent) => {
-    const res = await fetch('/api/calendar', {
+    await safeFetchJson('/api/calendar', {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: eventToDelete.id, title: eventToDelete.title }),
+      body: JSON.stringify({
+        id: eventToDelete.id,
+        title: eventToDelete.title,
+        isRecurring: eventToDelete.isRecurring,
+      }),
     });
-    const json = await res.json();
-    if (!res.ok || !json.success) {
-      throw new Error(json.error || 'Failed to delete event');
-    }
-    setEvents(prev => prev.filter(e => e.id !== eventToDelete.id));
-    handleFetchBriefing(true);
+    const nextEvents = events.filter(e => e.id !== eventToDelete.id);
+    setEvents(nextEvents);
+    handleFetchBriefing(true, { events: nextEvents, reminders, emails });
   };
 
   // Convert Email to Reminder Workflow
@@ -324,7 +374,7 @@ export default function DashboardPage() {
   const handleMarkRead = async (email: EmailThread) => {
     setEmails(prev => prev.filter(e => e.id !== email.id));
     try {
-      const res = await fetch('/api/gmail/message', {
+      await safeFetchJson('/api/gmail/message', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -333,15 +383,25 @@ export default function DashboardPage() {
           accountEmail: email.accountEmail,
         }),
       });
-      if (!res.ok) {
-        // Restore & open modal so user sees re-auth prompt if gmail.modify is missing
-        setEmails(prev => [email, ...prev]);
-        setSelectedEmail(email);
-      }
     } catch {
       setEmails(prev => [email, ...prev]);
+      setSelectedEmail(email);
     }
   };
+
+  const upcomingCount = getUpcomingEventIds(events).size;
+
+  const availableCalendars = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          events
+            .map(e => e.calendarName)
+            .filter(c => c && !/holiday|birthday|siri/i.test(c))
+        )
+      ),
+    [events]
+  );
 
   return (
     <div className="min-h-screen flex flex-col bg-[#0A0A0C] text-zinc-100 overflow-x-hidden">
@@ -358,14 +418,7 @@ export default function DashboardPage() {
         {(
           [
             { id: 'briefing', label: 'Briefing' },
-            {
-              id: 'schedule',
-              label: `Schedule (${events.filter(e => {
-                const startOfToday = new Date();
-                startOfToday.setHours(0, 0, 0, 0);
-                return new Date(e.endTime || e.startTime).getTime() >= startOfToday.getTime();
-              }).length})`,
-            },
+            { id: 'schedule', label: `Schedule (${upcomingCount})` },
             { id: 'tasks', label: `Reminders (${reminders.filter(r => !r.isCompleted).length})` },
             { id: 'mail', label: `Inbox (${emails.length})` },
           ] as Array<{ id: MobileTab; label: string }>
@@ -403,6 +456,19 @@ export default function DashboardPage() {
             </button>
           </div>
         )}
+
+        {syncError && (
+          <div className="px-4 py-2.5 rounded-xl border bg-rose-500/10 border-rose-500/30 text-rose-300 text-xs flex items-center justify-between gap-3">
+            <span>{syncError}</span>
+            <button
+              onClick={() => setSyncError(null)}
+              className="text-[11px] opacity-75 hover:opacity-100 font-medium shrink-0"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
+
         {/* Section 1: Compact Hero AI Daily Briefing + Merged Top 3 Priorities */}
         <section className={mobileTab === 'briefing' ? 'block' : 'hidden md:block'}>
           <DailyBriefingCard
@@ -411,7 +477,7 @@ export default function DashboardPage() {
           />
         </section>
 
-        {/* Section 2: 3-Column Operational Command Center (Above the fold on desktop) */}
+        {/* Section 2: 3-Column Operational Command Center */}
         <section className="grid grid-cols-1 md:grid-cols-3 gap-5">
           {/* Column 1: Apple Calendar */}
           <div className={`h-full ${mobileTab === 'schedule' ? 'block' : 'hidden md:block'}`}>
@@ -449,14 +515,14 @@ export default function DashboardPage() {
               onMarkRead={handleMarkRead}
               onDisconnectAccount={async (email) => {
                 try {
-                  await fetch('/api/gmail/accounts', {
+                  await safeFetchJson('/api/gmail/accounts', {
                     method: 'DELETE',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ email }),
                   });
                   await handleFullSync();
-                } catch (err) {
-                  console.error('Failed to disconnect Gmail account:', err);
+                } catch (err: any) {
+                  setSyncError(err?.message || 'Failed to disconnect Gmail account');
                 }
               }}
               health={health?.gmail}
@@ -478,25 +544,13 @@ export default function DashboardPage() {
         isOpen={isEventModalOpen}
         onClose={() => setIsEventModalOpen(false)}
         onSubmit={handleCreateEvent}
-        availableCalendars={Array.from(
-          new Set(
-            events
-              .map(e => e.calendarName)
-              .filter(c => c && !/holiday|birthday|siri/i.test(c))
-          )
-        )}
+        availableCalendars={availableCalendars}
       />
 
       {/* Calendar Event View / Edit / Delete Modal */}
       <EventDetailModal
         event={selectedEvent}
-        availableCalendars={Array.from(
-          new Set(
-            events
-              .map(e => e.calendarName)
-              .filter(c => c && !/holiday|birthday|siri/i.test(c))
-          )
-        )}
+        availableCalendars={availableCalendars}
         onClose={() => setSelectedEvent(null)}
         onUpdate={handleUpdateEvent}
         onDelete={handleDeleteEvent}
@@ -521,31 +575,32 @@ export default function DashboardPage() {
 
       {/* Live Grounded AI Life Assistant */}
       <LifeAssistantDrawer
-        onReminderCreated={(created, needsFullRefresh) => {
+        onRemindersMutated={(createdList, needsFullRefresh) => {
           if (needsFullRefresh) {
             handleFullSync();
-          } else if (created) {
-            setReminders(prev => [
-              created,
-              ...prev.filter(
-                r => r.isCompleted || r.title.trim().toLowerCase() !== created.title.trim().toLowerCase()
+          } else if (createdList && createdList.length > 0) {
+            const titleSet = new Set(createdList.map(c => c.title.trim().toLowerCase()));
+            const nextReminders = [
+              ...createdList,
+              ...reminders.filter(
+                r => r.isCompleted || !titleSet.has(r.title.trim().toLowerCase())
               ),
-            ]);
-            handleFetchBriefing(true);
+            ];
+            setReminders(nextReminders);
+            handleFetchBriefing(true, { events, reminders: nextReminders, emails });
           } else {
             handleFullSync();
           }
         }}
-        onEventCreated={(created, needsFullRefresh) => {
+        onEventsMutated={(createdList, needsFullRefresh) => {
           if (needsFullRefresh) {
             handleFullSync();
-          } else if (created) {
-            setEvents(prev =>
-              [...prev, created].sort(
-                (a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime()
-              )
+          } else if (createdList && createdList.length > 0) {
+            const nextEvents = [...events, ...createdList].sort(
+              (a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime()
             );
-            handleFetchBriefing(true);
+            setEvents(nextEvents);
+            handleFetchBriefing(true, { events: nextEvents, reminders, emails });
           } else {
             handleFullSync();
           }

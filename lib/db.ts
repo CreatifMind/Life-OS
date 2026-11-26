@@ -153,14 +153,20 @@ export async function getSyncedReminders(): Promise<any[]> {
   }
 }
 
-export async function updateSyncedReminderStatus(uid: string, isCompleted: boolean): Promise<void> {
+export async function updateSyncedReminderStatus(uid: string, isCompleted: boolean): Promise<boolean> {
   const existing = await getSyncedReminders();
-  const updated = existing.map(r =>
-    r.uid === uid || r.id === uid
-      ? { ...r, isCompleted, completedAt: isCompleted ? new Date().toISOString() : undefined }
-      : r
-  );
-  await saveSyncedReminders(updated);
+  let found = false;
+  const updated = existing.map(r => {
+    if (r.uid === uid || r.id === uid) {
+      found = true;
+      return { ...r, isCompleted, completedAt: isCompleted ? new Date().toISOString() : undefined };
+    }
+    return r;
+  });
+  if (found) {
+    await saveSyncedReminders(updated);
+  }
+  return found;
 }
 
 export async function completeSyncedReminderByTitle(matchTitle: string): Promise<boolean> {
@@ -197,13 +203,22 @@ export async function addPendingReminder(input: {
   title: string;
   listName?: string;
   dueDate?: string;
+  clearDueDate?: boolean;
   notes?: string;
+  clearNotes?: boolean;
   replaceTitle?: string;
 }): Promise<any> {
   const cleanTitle = input.title.trim();
   const listName = (input.listName || 'Reminders').trim();
   const uid = `lifeos-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
   const matchKey = (input.replaceTitle || cleanTitle).trim().toLowerCase();
+
+  const pending = await getPendingReminders();
+  const existingPending = pending.find(
+    p => String(p.title || '').trim().toLowerCase() === matchKey
+  );
+  const effectiveReplaceTitle =
+    existingPending?.replaceTitle?.trim() || input.replaceTitle?.trim() || undefined;
 
   const newTask = {
     id: uid,
@@ -212,12 +227,14 @@ export async function addPendingReminder(input: {
     listName,
     isCompleted: false,
     priority: 0 as const,
-    dueDate: input.dueDate || undefined,
-    notes: input.notes?.trim() || undefined,
-    replaceTitle: input.replaceTitle?.trim() || undefined,
+    dueDate: input.clearDueDate ? undefined : input.dueDate || undefined,
+    clearDueDate: Boolean(input.clearDueDate) || undefined,
+    notes: input.clearNotes ? undefined : input.notes?.trim() || undefined,
+    clearNotes: Boolean(input.clearNotes) || undefined,
+    replaceTitle: effectiveReplaceTitle,
+    updatedAt: new Date().toISOString(),
   };
 
-  const pending = await getPendingReminders();
   const filteredPending = pending.filter(
     p => String(p.title || '').trim().toLowerCase() !== matchKey
   );

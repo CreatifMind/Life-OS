@@ -9,7 +9,9 @@ export const maxDuration = 30;
 
 async function isAuthorizedSyncRequest(req: NextRequest): Promise<boolean> {
   const syncSecret = process.env.SYNC_SECRET;
-  if (!syncSecret) return true;
+  if (!syncSecret) {
+    return process.env.NODE_ENV !== 'production';
+  }
 
   const authHeader = req.headers.get('authorization');
   const querySecret = req.nextUrl.searchParams.get('secret');
@@ -71,6 +73,7 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       success: true,
+      syncSnapshotAt: new Date().toISOString(),
       count: reminders.length,
       openCount: openTasks.length,
       completedCount: completedTasks.length,
@@ -105,6 +108,8 @@ export async function POST(req: NextRequest) {
     const contentType = req.headers.get('content-type') || '';
     let rawItems: any[] = [];
     let createdPendingUids: string[] = [];
+    let syncSnapshotAt: string | undefined;
+    let completedTitlesProcessed = new Set<string>();
 
     if (contentType.includes('application/json')) {
       const body = await req.json();
@@ -114,9 +119,22 @@ export async function POST(req: NextRequest) {
         if (Array.isArray(body.createdPendingUids)) {
           createdPendingUids = body.createdPendingUids.filter((u: any) => typeof u === 'string');
         }
-        // Find reminders array property (excluding createdPendingUids)
+        if (typeof body.syncSnapshotAt === 'string') {
+          syncSnapshotAt = body.syncSnapshotAt;
+        }
+        if (Array.isArray(body.completedTitlesProcessed)) {
+          completedTitlesProcessed = new Set(
+            body.completedTitlesProcessed
+              .filter((t: any) => typeof t === 'string')
+              .map((t: string) => t.trim().toLowerCase())
+          );
+        }
+        // Find reminders array property (excluding metadata arrays)
         const arrayEntry = Object.entries(body).find(
-          ([k, v]) => k !== 'createdPendingUids' && Array.isArray(v)
+          ([k, v]) =>
+            k !== 'createdPendingUids' &&
+            k !== 'completedTitlesProcessed' &&
+            Array.isArray(v)
         );
         if (arrayEntry && Array.isArray(arrayEntry[1])) {
           rawItems = arrayEntry[1];
@@ -225,14 +243,37 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // Preserve any in-flight mobile check-offs made after syncSnapshotAt (between Step 1 GET and Step 5 POST)
+    const currentSynced = await getSyncedReminders();
+    const snapshotMs = syncSnapshotAt ? new Date(syncSnapshotAt).getTime() : Date.now() - 15000;
+    const recentCompletions = new Map<string, string>();
+    for (const existing of currentSynced) {
+      if (existing.isCompleted && existing.completedAt) {
+        const compMs = new Date(existing.completedAt).getTime();
+        const key = String(existing.title || '').trim().toLowerCase();
+        if (!isNaN(compMs) && compMs > snapshotMs && key && !completedTitlesProcessed.has(key)) {
+          recentCompletions.set(key, existing.completedAt);
+        }
+      }
+    }
+
+    const merged = sanitized.map(item => {
+      const key = item.title.trim().toLowerCase();
+      const compAt = recentCompletions.get(key);
+      if (compAt) {
+        return { ...item, isCompleted: true, completedAt: compAt };
+      }
+      return item;
+    });
+
     // Save to Supabase
-    await saveSyncedReminders(sanitized);
+    await saveSyncedReminders(merged);
 
     return NextResponse.json({
       success: true,
-      message: `Successfully synced ${sanitized.length} reminder(s) from Apple Shortcuts`,
-      count: sanitized.length,
-      syncedReminders: sanitized,
+      message: `Successfully synced ${merged.length} reminder(s) from Apple Shortcuts`,
+      count: merged.length,
+      syncedReminders: merged,
     });
   } catch (err: any) {
     console.error('Failed to sync reminders via webhook:', err);

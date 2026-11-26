@@ -141,6 +141,7 @@ export async function getFreshAccessToken(refreshTokenOverride?: string): Promis
   const res = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    signal: AbortSignal.timeout(10000),
     body: new URLSearchParams({
       client_id: CLIENT_ID,
       client_secret: CLIENT_SECRET,
@@ -164,12 +165,31 @@ export async function getFreshAccessToken(refreshTokenOverride?: string): Promis
 
 export async function hasGmailSendScope(): Promise<boolean> {
   try {
-    const accessToken = await getFreshAccessToken();
-    const res = await fetch(`https://www.googleapis.com/oauth2/v1/tokeninfo?access_token=${encodeURIComponent(accessToken)}`);
-    if (!res.ok) return false;
-    const info = await res.json();
-    const scopeStr = String(info.scope || '');
-    return scopeStr.includes('gmail.send');
+    const accounts = await getConnectedGoogleAccounts();
+    const checkToken = async (token: string) => {
+      const res = await fetch(
+        `https://www.googleapis.com/oauth2/v1/tokeninfo?access_token=${encodeURIComponent(token)}`,
+        { signal: AbortSignal.timeout(6000) }
+      );
+      if (!res.ok) return false;
+      const info = await res.json();
+      return String(info.scope || '').includes('gmail.send');
+    };
+
+    if (accounts.length === 0) {
+      const accessToken = await getFreshAccessToken();
+      return checkToken(accessToken);
+    }
+
+    const checks = await Promise.allSettled(
+      accounts.map(async acc => {
+        const tok = await getFreshAccessToken(acc.refreshToken);
+        return checkToken(tok);
+      })
+    );
+
+    const results = checks.map(c => (c.status === 'fulfilled' ? c.value : false));
+    return results.length > 0 && results.every(Boolean);
   } catch {
     return false;
   }
@@ -309,7 +329,10 @@ function sanitizeEmailHtml(html: string, rawMessageId: string, accountEmail: str
   let clean = html
     .replace(/<script[\s\S]*?<\/script>/gi, '')
     .replace(/\son\w+="[^"]*"/gi, '')
-    .replace(/\son\w+='[^']*'/gi, '');
+    .replace(/\son\w+='[^']*'/gi, '')
+    .replace(/href\s*=\s*"javascript:[^"]*"/gi, 'href="#"')
+    .replace(/href\s*=\s*'javascript:[^']*'/gi, "href='#'")
+    .replace(/\btarget\s*=\s*["']_(?:self|parent|top)["']/gi, 'target="_blank" rel="noopener noreferrer"');
 
   // Rewrite inline cid: image references to our authenticated attachment proxy route
   for (const att of attachments) {
@@ -489,6 +512,7 @@ async function fetchEmailsForAccount(account: ConnectedGmailAccount, maxResults:
   const query = encodeURIComponent('in:inbox category:primary is:unread -subject:"Life OS •" -subject:"Executive Daily Briefing"');
   const listRes = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages?maxResults=${maxResults}&q=${query}`, {
     headers: { Authorization: `Bearer ${accessToken}` },
+    signal: AbortSignal.timeout(10000),
   });
 
   const listData = await listRes.json();
@@ -496,55 +520,72 @@ async function fetchEmailsForAccount(account: ConnectedGmailAccount, maxResults:
     throw new Error(`Gmail API error (${account.email}): ${listData.error.message}`);
   }
   const messages = listData.messages || [];
+
+  const decodeEntities = (s: string) =>
+    s
+      .replace(/&nbsp;/gi, ' ')
+      .replace(/&amp;/gi, '&')
+      .replace(/&lt;/gi, '<')
+      .replace(/&gt;/gi, '>')
+      .replace(/&quot;/gi, '"')
+      .replace(/&#39;|&apos;|&rsquo;|&lsquo;/gi, "'")
+      .replace(/&ldquo;|&rdquo;/gi, '"')
+      .replace(/&mdash;/gi, '—')
+      .replace(/&ndash;/gi, '–')
+      .replace(/&#(\d+);/g, (_, dec) => String.fromCharCode(Number(dec)))
+      .replace(/&#x([0-9a-f]+);/gi, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
+
+  const results = await Promise.allSettled(
+    messages.map(async (item: any): Promise<EmailThread | null> => {
+      const msgRes = await fetch(
+        `https://gmail.googleapis.com/gmail/v1/users/me/messages/${item.id}?format=metadata&metadataHeaders=Subject&metadataHeaders=From&metadataHeaders=Date`,
+        {
+          headers: { Authorization: `Bearer ${accessToken}` },
+          signal: AbortSignal.timeout(8000),
+        }
+      );
+
+      if (!msgRes.ok) return null;
+
+      const msg = await msgRes.json();
+      const headers = msg.payload?.headers || [];
+
+      const subject = headers.find((h: any) => h.name.toLowerCase() === 'subject')?.value || '(No Subject)';
+      const from = headers.find((h: any) => h.name.toLowerCase() === 'from')?.value || 'Unknown';
+      const date = headers.find((h: any) => h.name.toLowerCase() === 'date')?.value || new Date().toISOString();
+
+      let senderName = from;
+      let senderEmail = from;
+      const emailMatch = /<([^>]+)>/.exec(from);
+      if (emailMatch) {
+        senderEmail = emailMatch[1];
+        senderName = from.replace(emailMatch[0], '').trim().replace(/^"|"$/g, '');
+      }
+
+      const isImportant = (msg.labelIds || []).includes('IMPORTANT');
+      const isUnread = (msg.labelIds || []).includes('UNREAD');
+
+      return {
+        id: `${account.email}:${item.id}`,
+        threadId: item.threadId,
+        accountEmail: account.email,
+        senderName: senderName || senderEmail,
+        senderEmail,
+        subject,
+        receivedAt: new Date(date).toISOString(),
+        snippet: decodeEntities(msg.snippet || ''),
+        isUnread,
+        isImportant,
+      };
+    })
+  );
+
   const threads: EmailThread[] = [];
-
-  for (const item of messages) {
-    const msgRes = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${item.id}?format=metadata`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
-
-    if (!msgRes.ok) continue;
-
-    const msg = await msgRes.json();
-    const headers = msg.payload?.headers || [];
-
-    const subject = headers.find((h: any) => h.name.toLowerCase() === 'subject')?.value || '(No Subject)';
-    const from = headers.find((h: any) => h.name.toLowerCase() === 'from')?.value || 'Unknown';
-    const date = headers.find((h: any) => h.name.toLowerCase() === 'date')?.value || new Date().toISOString();
-
-    let senderName = from;
-    let senderEmail = from;
-    const emailMatch = /<([^>]+)>/.exec(from);
-    if (emailMatch) {
-      senderEmail = emailMatch[1];
-      senderName = from.replace(emailMatch[0], '').trim().replace(/^"|"$/g, '');
+  for (const r of results) {
+    if (r.status === 'fulfilled' && r.value) {
+      threads.push(r.value);
     }
-
-    const isImportant = (msg.labelIds || []).includes('IMPORTANT');
-    const isUnread = (msg.labelIds || []).includes('UNREAD');
-
-    const decodeEntities = (s: string) =>
-      s
-        .replace(/&amp;/g, '&')
-        .replace(/&lt;/g, '<')
-        .replace(/&gt;/g, '>')
-        .replace(/&quot;/g, '"')
-        .replace(/&#39;/g, "'");
-
-    threads.push({
-      id: `${account.email}:${item.id}`,
-      threadId: item.threadId,
-      accountEmail: account.email,
-      senderName: senderName || senderEmail,
-      senderEmail,
-      subject,
-      receivedAt: new Date(date).toISOString(),
-      snippet: decodeEntities(msg.snippet || ''),
-      isUnread,
-      isImportant,
-    });
   }
-
   return threads;
 }
 
@@ -555,7 +596,7 @@ export async function fetchRecentEmails(maxResults = 10): Promise<EmailThread[]>
       throw new Error('No Google accounts connected');
     }
 
-    const perAccountLimit = accounts.length > 1 ? Math.max(5, Math.ceil(maxResults / accounts.length) + 2) : maxResults;
+    const perAccountLimit = maxResults;
     const results = await Promise.allSettled(
       accounts.map(acc => fetchEmailsForAccount(acc, perAccountLimit))
     );

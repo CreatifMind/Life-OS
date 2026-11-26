@@ -248,6 +248,11 @@ export function RemindersWidget({
                           </>
                         )}
                       </div>
+                      {task.notes && (
+                        <p className="text-[11px] text-zinc-500 line-clamp-1 mt-1">
+                          {task.notes}
+                        </p>
+                      )}
                     </div>
                   </div>
                 );

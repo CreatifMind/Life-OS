@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { Lock, Sparkles, ArrowRight, Loader2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import { safeFetchJson } from '@/lib/client';
 
 export default function LoginPage() {
   const [password, setPassword] = useState('');
@@ -19,23 +20,16 @@ export default function LoginPage() {
     setError('');
 
     try {
-      const res = await fetch('/api/auth/login', {
+      await safeFetchJson('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password, rememberMe }),
       });
 
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        setError(data.error || 'Incorrect passcode');
-        setIsLoading(false);
-        return;
-      }
-
       router.push('/');
       router.refresh();
-    } catch {
-      setError('Connection failed. Please try again.');
+    } catch (err: any) {
+      setError(err?.message || 'Connection failed. Please try again.');
       setIsLoading(false);
     }
   };

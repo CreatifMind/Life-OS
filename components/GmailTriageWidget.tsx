@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Mail, CheckSquare, Inbox, Plus, X, Check } from 'lucide-react';
 import { EmailThread } from '@/lib/types';
 
@@ -21,6 +21,20 @@ function shortAccountLabel(email: string): string {
   return user.length > 12 ? `${user.slice(0, 12)}…` : user;
 }
 
+function formatEmailTimestamp(iso: string): string {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  const now = new Date();
+  const isSameDay =
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate();
+  const timePart = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  if (isSameDay) return timePart;
+  const datePart = d.toLocaleDateString([], { day: 'numeric', month: 'short' });
+  return `${datePart} · ${timePart}`;
+}
+
 export function GmailTriageWidget({
   emails,
   isLoading,
@@ -31,8 +45,15 @@ export function GmailTriageWidget({
   health,
 }: GmailTriageWidgetProps) {
   const [selectedAccount, setSelectedAccount] = useState<string>('all');
+  const [confirmDisconnect, setConfirmDisconnect] = useState<string | null>(null);
   const isError = health?.status === 'ERROR';
   const accounts = health?.accounts || [];
+
+  useEffect(() => {
+    if (!confirmDisconnect) return;
+    const timer = setTimeout(() => setConfirmDisconnect(null), 4000);
+    return () => clearTimeout(timer);
+  }, [confirmDisconnect]);
 
   const filteredEmails =
     selectedAccount === 'all'
@@ -75,35 +96,66 @@ export function GmailTriageWidget({
           )}
           {accounts.map(acc => {
             const active = selectedAccount.toLowerCase() === acc.toLowerCase();
+            const isConfirming = confirmDisconnect?.toLowerCase() === acc.toLowerCase();
             return (
               <div
                 key={acc}
                 className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors ${
-                  active
+                  isConfirming
+                    ? 'bg-rose-500/15 border border-rose-500/40 text-rose-200'
+                    : active
                     ? 'bg-white text-zinc-950'
                     : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/60'
                 }`}
               >
-                <button
-                  onClick={() => setSelectedAccount(active ? 'all' : acc)}
-                  title={acc}
-                  className="truncate max-w-[110px]"
-                >
-                  {shortAccountLabel(acc)}
-                </button>
-                {onDisconnectAccount && accounts.length > 1 && (
-                  <button
-                    onClick={e => {
-                      e.stopPropagation();
-                      onDisconnectAccount(acc);
-                    }}
-                    className={`ml-0.5 transition-colors ${
-                      active ? 'text-zinc-600 hover:text-zinc-950' : 'text-zinc-600 hover:text-rose-400'
-                    }`}
-                    title={`Disconnect ${acc}`}
-                  >
-                    <X className="w-2.5 h-2.5" />
-                  </button>
+                {isConfirming && onDisconnectAccount ? (
+                  <>
+                    <button
+                      onClick={e => {
+                        e.stopPropagation();
+                        setConfirmDisconnect(null);
+                        onDisconnectAccount(acc);
+                      }}
+                      className="font-semibold text-rose-300 hover:text-white"
+                      title={`Confirm disconnect ${acc}`}
+                    >
+                      Remove {shortAccountLabel(acc)}?
+                    </button>
+                    <button
+                      onClick={e => {
+                        e.stopPropagation();
+                        setConfirmDisconnect(null);
+                      }}
+                      className="ml-0.5 text-zinc-400 hover:text-white"
+                      title="Cancel"
+                    >
+                      <X className="w-2.5 h-2.5" />
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      onClick={() => setSelectedAccount(active ? 'all' : acc)}
+                      title={acc}
+                      className="truncate max-w-[110px]"
+                    >
+                      {shortAccountLabel(acc)}
+                    </button>
+                    {onDisconnectAccount && accounts.length > 1 && (
+                      <button
+                        onClick={e => {
+                          e.stopPropagation();
+                          setConfirmDisconnect(acc);
+                        }}
+                        className={`ml-0.5 transition-colors ${
+                          active ? 'text-zinc-600 hover:text-zinc-950' : 'text-zinc-600 hover:text-rose-400'
+                        }`}
+                        title={`Disconnect ${acc}`}
+                      >
+                        <X className="w-2.5 h-2.5" />
+                      </button>
+                    )}
+                  </>
                 )}
               </div>
             );
@@ -169,7 +221,7 @@ export function GmailTriageWidget({
                   {email.senderName}
                 </span>
                 <span className="text-[10px] text-zinc-500 font-mono shrink-0">
-                  {new Date(email.receivedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  {formatEmailTimestamp(email.receivedAt)}
                 </span>
               </div>
 

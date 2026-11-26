@@ -30,7 +30,7 @@ export async function GET(req: NextRequest) {
 
     // 2. Fetch ground-truth data from Apple CalDAV and Gmail
     const [eventsResult, remindersResult, emailsResult] = await Promise.allSettled([
-      fetchLiveCalendarEvents(),
+      fetchLiveCalendarEvents(14, 60),
       fetchLiveReminders(),
       fetchRecentEmails(10),
     ]);

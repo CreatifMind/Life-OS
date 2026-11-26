@@ -11,22 +11,35 @@ const APP_TIMEZONE = process.env.APP_TIMEZONE || 'Asia/Kuala_Lumpur';
 
 interface GeminiGenerateResponse {
   candidates?: Array<{
+    finishReason?: string;
     content?: {
-      parts?: Array<{ text?: string }>;
+      parts?: Array<{ text?: string; thought?: boolean }>;
     };
   }>;
   error?: { code: number; message: string; status: string };
 }
 
-// Highly reliable high-availability models with generous free quotas
-const MODELS = ['gemini-3.1-flash-lite', 'gemini-3.5-flash-lite', 'gemini-3.8-flash'];
+// Ordered by verified availability & speed (avoids hanging gemini-3.1-flash-lite & 503 gemini-3.8-flash)
+const MODELS = [
+  'gemini-3.5-flash-lite',
+  'gemini-3.5-flash',
+  'gemini-3-flash-preview',
+  'gemini-3.6-flash',
+];
+
+function stripMarkdownJsonFences(raw: string): string {
+  return raw
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/```\s*$/i, '')
+    .trim();
+}
 
 export async function callGemini(
   prompt: string,
   responseMimeType: 'application/json' | 'text/plain' = 'application/json'
 ): Promise<string> {
   if (!GEMINI_API_KEY) {
-    throw new Error('GEMINI_API_KEY is not configured in .env.local');
+    throw new Error('GEMINI_API_KEY is not configured in environment');
   }
 
   let lastError = '';
@@ -37,49 +50,105 @@ export async function callGemini(
       const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: AbortSignal.timeout(10000),
         body: JSON.stringify({
           contents: [{ parts: [{ text: prompt }] }],
           generationConfig: {
             temperature: 0.2,
-            maxOutputTokens: 2048,
+            maxOutputTokens: 4096,
             responseMimeType,
           },
         }),
       });
 
-      const data: GeminiGenerateResponse = await res.json();
-      if (data.error) {
-        lastError = `${model}: ${data.error.message}`;
+      const rawBody = await res.text();
+      let data: GeminiGenerateResponse | null = null;
+      try {
+        data = JSON.parse(rawBody);
+      } catch {
+        lastError = `${model}: Non-JSON HTTP ${res.status}`;
         continue;
       }
 
-      const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (text) return text;
+      if (!res.ok || data?.error) {
+        lastError = `${model}: ${data?.error?.message || `HTTP ${res.status}`}`;
+        continue;
+      }
+
+      const cand = data?.candidates?.[0];
+      if (!cand) {
+        lastError = `${model}: Empty candidate list`;
+        continue;
+      }
+
+      if (cand.finishReason === 'MAX_TOKENS') {
+        lastError = `${model}: Response truncated (MAX_TOKENS)`;
+        continue;
+      }
+
+      const text = (cand.content?.parts || [])
+        .filter(p => !p.thought && typeof p.text === 'string')
+        .map(p => p.text!)
+        .join('')
+        .trim();
+
+      if (!text) {
+        lastError = `${model}: Empty text output (finishReason=${cand.finishReason || 'unknown'})`;
+        continue;
+      }
+
+      if (responseMimeType === 'application/json') {
+        try {
+          JSON.parse(stripMarkdownJsonFences(text));
+        } catch {
+          lastError = `${model}: Malformed JSON output`;
+          continue;
+        }
+      }
+
+      return text;
     } catch (err: any) {
-      lastError = `${model}: ${err.message}`;
+      lastError = `${model}: ${err?.message || 'Request failed'}`;
     }
   }
 
   throw new Error(`All Gemini models failed: ${lastError}`);
 }
 
+export async function callGeminiJson<T = any>(prompt: string): Promise<T> {
+  const raw = await callGemini(prompt, 'application/json');
+  return JSON.parse(stripMarkdownJsonFences(raw)) as T;
+}
+
+function resolveSafeTimeZone(tz?: string): string {
+  const candidate = (tz || '').trim() || APP_TIMEZONE;
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: candidate }).format(new Date());
+    return candidate;
+  } catch {
+    return APP_TIMEZONE;
+  }
+}
+
 export async function generateDailyBriefing(
   events: CalendarEvent[],
   reminders: ReminderTask[],
-  emails: EmailThread[]
+  emails: EmailThread[],
+  timeZone?: string
 ): Promise<DailyBriefing> {
   const now = new Date();
+  const activeTimeZone = resolveSafeTimeZone(timeZone);
 
-  const currentDateMYT = now.toLocaleDateString('en-MY', {
-    timeZone: APP_TIMEZONE,
+  const currentDateLocal = now.toLocaleDateString('en-MY', {
+    timeZone: activeTimeZone,
     weekday: 'long',
     year: 'numeric',
     month: 'long',
     day: 'numeric',
   });
 
-  const currentTimeMYT = now.toLocaleTimeString('en-MY', {
-    timeZone: APP_TIMEZONE,
+  const currentTimeLocal = now.toLocaleTimeString('en-MY', {
+    timeZone: activeTimeZone,
     hour: 'numeric',
     minute: '2-digit',
     hour12: true,
@@ -96,49 +165,55 @@ export async function generateDailyBriefing(
     );
   });
 
-  // Calculate start of today in APP_TIMEZONE
-  // Keep events from start of today onwards
   const todayStr = new Intl.DateTimeFormat('en-CA', {
-    timeZone: APP_TIMEZONE,
+    timeZone: activeTimeZone,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
   }).format(now); // "YYYY-MM-DD"
 
+  const formatYmdFriendly = (ymd: string) => {
+    const [y, m, d] = ymd.split('-').map(Number);
+    const utcDate = new Date(Date.UTC(y, (m || 1) - 1, d || 1, 12, 0, 0));
+    return utcDate.toLocaleDateString('en-MY', {
+      timeZone: 'UTC',
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+    });
+  };
+
   const activeEvents = events.filter(e => {
+    if (e.isAllDay && e.startDate) {
+      const endYmd = e.endDate || e.startDate;
+      return endYmd >= todayStr;
+    }
     const endIso = e.endTime || e.startTime;
-    const endStr = endIso.split('T')[0];
+    const endStr = new Intl.DateTimeFormat('en-CA', {
+      timeZone: activeTimeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date(endIso));
     return endStr >= todayStr || new Date(endIso).getTime() >= now.getTime() - 24 * 60 * 60 * 1000;
   });
 
   // Format events with explicit 12-hour AM/PM and real-time temporal status
   const formattedEvents = activeEvents.map(e => {
-    const startD = new Date(e.startTime);
-    const endD = new Date(e.endTime || e.startTime);
-    const isPast = endD.getTime() < now.getTime();
-    const isOngoing = startD.getTime() <= now.getTime() && endD.getTime() > now.getTime();
-
-    const dateStr = startD.toLocaleDateString('en-MY', {
-      timeZone: APP_TIMEZONE,
-      weekday: 'short',
-      month: 'short',
-      day: 'numeric',
-    });
-    const startTimeStr = startD.toLocaleTimeString('en-MY', {
-      timeZone: APP_TIMEZONE,
-      hour: 'numeric',
-      minute: '2-digit',
-      hour12: true,
-    });
-    const endTimeStr = endD.toLocaleTimeString('en-MY', {
-      timeZone: APP_TIMEZONE,
-      hour: 'numeric',
-      minute: '2-digit',
-      hour12: true,
-    });
-
     if (e.isAllDay) {
-      const isMultiDay = endD.getTime() - startD.getTime() > 24 * 60 * 60 * 1000;
+      const startYmd =
+        e.startDate ||
+        new Intl.DateTimeFormat('en-CA', {
+          timeZone: activeTimeZone,
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+        }).format(new Date(e.startTime));
+      const endYmd = e.endDate || startYmd;
+      const isMultiDay = endYmd > startYmd;
+      const isPast = endYmd < todayStr;
+      const isOngoing = startYmd <= todayStr && endYmd >= todayStr;
+
       let status = '';
       if (isPast) {
         status = '[STATUS: PAST / COMPLETED]';
@@ -147,8 +222,32 @@ export async function generateDailyBriefing(
       } else {
         status = `[STATUS: UPCOMING ${isMultiDay ? 'MULTI-DAY' : 'ALL DAY'}]`;
       }
-      return `- "${e.title}" [${e.calendarName}] ${status} on ${dateStr}${isMultiDay ? ` through ${endD.toLocaleDateString('en-MY', { timeZone: APP_TIMEZONE, month: 'short', day: 'numeric' })}` : ''}${e.location ? ` @ ${e.location}` : ''}`;
+      return `- "${e.title}" [${e.calendarName}] ${status} on ${formatYmdFriendly(startYmd)}${isMultiDay ? ` through ${formatYmdFriendly(endYmd)}` : ''}${e.location ? ` @ ${e.location}` : ''}`;
     }
+
+    const startD = new Date(e.startTime);
+    const endD = new Date(e.endTime || e.startTime);
+    const isPast = endD.getTime() < now.getTime();
+    const isOngoing = startD.getTime() <= now.getTime() && endD.getTime() > now.getTime();
+
+    const dateStr = startD.toLocaleDateString('en-MY', {
+      timeZone: activeTimeZone,
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+    });
+    const startTimeStr = startD.toLocaleTimeString('en-MY', {
+      timeZone: activeTimeZone,
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+    });
+    const endTimeStr = endD.toLocaleTimeString('en-MY', {
+      timeZone: activeTimeZone,
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+    });
 
     let status = '';
     if (isPast) {
@@ -170,7 +269,7 @@ export async function generateDailyBriefing(
     return `- "${e.title}" [${e.calendarName}] ${status} (Scheduled: ${dateStr} from ${startTimeStr} to ${endTimeStr})${e.location ? ` @ ${e.location}` : ''}`;
   });
 
-  // Format reminders with explicit MYT date, 12-hour time, and real-time overdue status
+  // Format reminders with explicit local date, 12-hour time, and real-time overdue status
   const formattedReminders = cleanReminders.map(r => {
     if (!r.dueDate) {
       return `- [${r.isCompleted ? 'COMPLETED' : 'OPEN'}] "${r.title}" (List: ${r.listName}, No due time)`;
@@ -180,19 +279,19 @@ export async function generateDailyBriefing(
       return `- [${r.isCompleted ? 'COMPLETED' : 'OPEN'}] "${r.title}" (List: ${r.listName})`;
     }
     const dueDateKey = new Intl.DateTimeFormat('en-CA', {
-      timeZone: APP_TIMEZONE,
+      timeZone: activeTimeZone,
       year: 'numeric',
       month: '2-digit',
       day: '2-digit',
     }).format(dueD);
     const dueDateStr = dueD.toLocaleDateString('en-MY', {
-      timeZone: APP_TIMEZONE,
+      timeZone: activeTimeZone,
       weekday: 'short',
       month: 'short',
       day: 'numeric',
     });
     const dueTimeStr = dueD.toLocaleTimeString('en-MY', {
-      timeZone: APP_TIMEZONE,
+      timeZone: activeTimeZone,
       hour: 'numeric',
       minute: '2-digit',
       hour12: true,
@@ -214,13 +313,13 @@ export async function generateDailyBriefing(
 
   const prompt = `
 You are the executive intelligence core of Life OS for user ${USER_NAME}.
-Current real-world time: ${currentDateMYT}, ${currentTimeMYT} (${APP_TIMEZONE}).
+Current real-world time: ${currentDateLocal}, ${currentTimeLocal} (${activeTimeZone}).
 
 Generate an authoritative, razor-sharp Executive Daily Briefing using ONLY the real ground-truth data below.
 DO NOT hallucinate or invent unlisted meetings, obligations, or times.
 
 CRITICAL TEMPORAL ACCURACY RULES:
-1. Ground every statement strictly against the current real-world time: ${currentDateMYT}, ${currentTimeMYT}.
+1. Ground every statement strictly against the current real-world time: ${currentDateLocal}, ${currentTimeLocal}.
 2. Past events are explicitly marked [STATUS: PAST / COMPLETED - ended X hours ago].
    - NEVER generate warnings, urgent alerts, or "starting in X minutes" notifications for completed/past events.
    - NEVER assign an event marked PAST / COMPLETED as a Top Priority to execute now.
@@ -274,15 +373,13 @@ Respond strictly in valid JSON matching this schema (BE ULTRA-CONCISE — zero f
 `;
 
   try {
-    const rawResponse = await callGemini(prompt);
-    const cleaned = rawResponse.replace(/^```json\s*/i, '').replace(/```\s*$/i, '').trim();
-    const parsed = JSON.parse(cleaned);
+    const parsed = await callGeminiJson<any>(prompt);
 
     const briefing: DailyBriefing = {
       id: `briefing-${Date.now()}`,
       briefingDate: todayStr,
       generatedAt: now.toISOString(),
-      headline: parsed.headline || `Good evening, ${USER_NAME}. Here is your operational briefing for ${currentDateMYT}.`,
+      headline: parsed.headline || `Good day, ${USER_NAME}. Here is your operational briefing for ${currentDateLocal}.`,
       topPriorities: (parsed.topPriorities || []).map((p: any, idx: number) => ({
         rank: p.rank || idx + 1,
         title: p.title || 'Focus Block',
@@ -293,7 +390,7 @@ Respond strictly in valid JSON matching this schema (BE ULTRA-CONCISE — zero f
       emailHighlights: parsed.emailHighlights || 'Priority correspondence reviewed.',
       warningsOrOverdue: parsed.warningsOrOverdue || [],
       suggestedPreparation: parsed.suggestedPreparation || 'Review upcoming events and proceed.',
-      fullMarkdown: rawResponse,
+      fullMarkdown: JSON.stringify(parsed),
       lastSyncTimestamp: now.toISOString(),
     };
 
@@ -305,7 +402,7 @@ Respond strictly in valid JSON matching this schema (BE ULTRA-CONCISE — zero f
       id: `briefing-${Date.now()}`,
       briefingDate: todayStr,
       generatedAt: now.toISOString(),
-      headline: `Good evening, ${USER_NAME}. You have ${upcomingEvents.length > 0 ? upcomingEvents[0].title : 'open focus time'} ahead and ${activeEvents.length} active commitment(s).`,
+      headline: `Good day, ${USER_NAME}. You have ${upcomingEvents.length > 0 ? upcomingEvents[0].title : 'open focus time'} ahead and ${activeEvents.length} active commitment(s).`,
       topPriorities: [
         ...(upcomingEvents.length > 0
           ? [{
@@ -334,7 +431,7 @@ Respond strictly in valid JSON matching this schema (BE ULTRA-CONCISE — zero f
       ],
       agendaSummary: upcomingEvents.length > 0
         ? `Upcoming commitments: ${upcomingEvents.map(e => e.title).join(', ')}`
-        : 'Your schedule for tonight is clear with open focus blocks.',
+        : 'Your schedule is clear with open focus blocks.',
       emailHighlights: emails.length > 0
         ? `${emails.length} unread thread(s) in inbox.`
         : 'All priority inboxes are currently clear.',

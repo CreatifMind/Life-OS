@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { RefreshCw, Sparkles } from 'lucide-react';
 import { SyncHealthStatus } from '@/lib/types';
+import { getClientTimeZoneInfo } from '@/lib/client';
 
 interface HeaderProps {
   onRefresh: () => Promise<void>;
@@ -15,13 +16,17 @@ interface HeaderProps {
 export function Header({ onRefresh, isSyncing, health, userName }: HeaderProps) {
   const [timeStr, setTimeStr] = useState<string>('');
   const [dateStr, setDateStr] = useState<string>('');
+  const [tzLabel, setTzLabel] = useState<string>('MYT');
+  const [greeting, setGreeting] = useState<string>('Welcome');
 
   useEffect(() => {
     function updateClock() {
       const now = new Date();
+      const hour = now.getHours();
+      setGreeting(hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening');
+      setTzLabel(getClientTimeZoneInfo().tzLabel);
       setTimeStr(
-        now.toLocaleTimeString('en-MY', {
-          timeZone: 'Asia/Kuala_Lumpur',
+        now.toLocaleTimeString([], {
           hour: '2-digit',
           minute: '2-digit',
           second: '2-digit',
@@ -29,8 +34,7 @@ export function Header({ onRefresh, isSyncing, health, userName }: HeaderProps) 
         })
       );
       setDateStr(
-        now.toLocaleDateString('en-MY', {
-          timeZone: 'Asia/Kuala_Lumpur',
+        now.toLocaleDateString([], {
           weekday: 'long',
           day: 'numeric',
           month: 'short',
@@ -43,18 +47,6 @@ export function Header({ onRefresh, isSyncing, health, userName }: HeaderProps) 
     const interval = setInterval(updateClock, 1000);
     return () => clearInterval(interval);
   }, []);
-
-  const getGreeting = () => {
-    const hourStr = new Date().toLocaleTimeString('en-GB', {
-      timeZone: 'Asia/Kuala_Lumpur',
-      hour: '2-digit',
-      hour12: false,
-    });
-    const hour = parseInt(hourStr, 10);
-    if (hour < 12) return 'Good morning';
-    if (hour < 18) return 'Good afternoon';
-    return 'Good evening';
-  };
 
   const hasError =
     health &&
@@ -88,15 +80,15 @@ export function Header({ onRefresh, isSyncing, health, userName }: HeaderProps) 
             />
           </div>
           <p className="text-xs text-zinc-500">
-            {getGreeting()}, <span className="text-zinc-300 font-medium">{userName || process.env.NEXT_PUBLIC_USER_NAME || 'Chris'}</span> · {dateStr || 'Loading...'}
+            {greeting}, <span className="text-zinc-300 font-medium">{userName || process.env.NEXT_PUBLIC_USER_NAME || 'Chris'}</span> · {dateStr || 'Loading...'}
           </p>
         </div>
       </div>
 
-      {/* Live MYT Clock & Sync */}
+      {/* Live Local Clock & Sync */}
       <div className="flex items-center gap-4 text-xs">
         <div className="font-mono text-zinc-400 tabular-nums">
-          <span className="text-[10px] text-zinc-600 mr-1.5 uppercase tracking-wider">MYT</span>
+          <span className="text-[10px] text-zinc-600 mr-1.5 uppercase tracking-wider">{tzLabel}</span>
           {timeStr || '00:00:00'}
         </div>
 

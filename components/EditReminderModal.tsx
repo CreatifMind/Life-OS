@@ -3,35 +3,26 @@
 import React, { useState, useEffect } from 'react';
 import { X, CheckSquare, Loader2, CheckCircle2 } from 'lucide-react';
 import { ReminderTask } from '@/lib/types';
-
-function toMytDateInput(iso?: string): string {
-  if (!iso) return '';
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return '';
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Kuala_Lumpur',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(d);
-}
-
-function toMytTimeInput(iso?: string): string {
-  if (!iso) return '';
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return '';
-  return d.toLocaleTimeString('en-GB', {
-    timeZone: 'Asia/Kuala_Lumpur',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  });
-}
+import {
+  getClientTimeZoneInfo,
+  toLocalDateInput,
+  toLocalIsoWithOffset,
+  toLocalTimeInput,
+} from '@/lib/client';
 
 interface EditReminderModalProps {
   reminder: ReminderTask | null;
   onClose: () => void;
-  onSave: (oldReminder: ReminderTask, updates: { title: string; dueDate?: string; notes?: string }) => Promise<void>;
+  onSave: (
+    oldReminder: ReminderTask,
+    updates: {
+      title: string;
+      dueDate?: string;
+      clearDueDate?: boolean;
+      notes?: string;
+      clearNotes?: boolean;
+    }
+  ) => Promise<void>;
   onMarkComplete: (uid: string) => Promise<void>;
 }
 
@@ -47,12 +38,17 @@ export function EditReminderModal({
   const [notes, setNotes] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState('');
+  const [tzLabel, setTzLabel] = useState('MYT');
+
+  useEffect(() => {
+    setTzLabel(getClientTimeZoneInfo().tzLabel);
+  }, []);
 
   useEffect(() => {
     if (!reminder) return;
     setTitle(reminder.title);
-    setDueDate(toMytDateInput(reminder.dueDate));
-    setDueTime(toMytTimeInput(reminder.dueDate));
+    setDueDate(toLocalDateInput(reminder.dueDate));
+    setDueTime(toLocalTimeInput(reminder.dueDate));
     setNotes(reminder.notes || '');
     setError('');
   }, [reminder]);
@@ -78,12 +74,19 @@ export function EditReminderModal({
       let isoDue: string | undefined;
       if (dueDate) {
         const timePart = dueTime || '09:00';
-        isoDue = `${dueDate}T${timePart}:00+08:00`;
+        isoDue = toLocalIsoWithOffset(dueDate, timePart);
       }
+      const hadDueDate = Boolean(reminder.dueDate);
+      const clearDueDate = hadDueDate && !dueDate;
+      const hadNotes = Boolean(reminder.notes?.trim());
+      const clearNotes = hadNotes && !notes.trim();
+
       await onSave(reminder, {
         title: title.trim(),
         dueDate: isoDue,
+        clearDueDate,
         notes: notes.trim() || undefined,
+        clearNotes,
       });
       onClose();
     } catch (err: any) {
@@ -143,9 +146,21 @@ export function EditReminderModal({
 
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-medium text-zinc-400 mb-1.5">
-                Due Date
-              </label>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="block text-xs font-medium text-zinc-400">Due Date</label>
+                {dueDate && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDueDate('');
+                      setDueTime('');
+                    }}
+                    className="text-[10px] text-zinc-500 hover:text-zinc-300"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
               <input
                 type="date"
                 value={dueDate}
@@ -156,7 +171,7 @@ export function EditReminderModal({
 
             <div>
               <label className="block text-xs font-medium text-zinc-400 mb-1.5">
-                Time (MYT)
+                Time ({tzLabel})
               </label>
               <input
                 type="time"

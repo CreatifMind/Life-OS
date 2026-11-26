@@ -1,16 +1,8 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { X, Calendar, MapPin, Loader2 } from 'lucide-react';
-
-function getTodayMytYmd(): string {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Kuala_Lumpur',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(new Date());
-}
+import { getClientTimeZoneInfo, getLocalYmd, toLocalIsoWithOffset } from '@/lib/client';
 
 interface NewEventModalProps {
   isOpen: boolean;
@@ -19,6 +11,8 @@ interface NewEventModalProps {
     title: string;
     startTime: string;
     endTime: string;
+    startDate?: string;
+    endDate?: string;
     isAllDay: boolean;
     location?: string;
     calendarName?: string;
@@ -33,7 +27,8 @@ export function NewEventModal({
   availableCalendars = [],
 }: NewEventModalProps) {
   const [title, setTitle] = useState('');
-  const [date, setDate] = useState(() => getTodayMytYmd());
+  const [date, setDate] = useState(() => getLocalYmd());
+  const [endDate, setEndDate] = useState(() => getLocalYmd());
   const [startHour, setStartHour] = useState('09:00');
   const [endHour, setEndHour] = useState('10:00');
   const [isAllDay, setIsAllDay] = useState(false);
@@ -41,11 +36,19 @@ export function NewEventModal({
   const [calendarName, setCalendarName] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const [tzLabel, setTzLabel] = useState('MYT');
+  const wasOpenRef = useRef(false);
 
   useEffect(() => {
-    if (isOpen) {
+    setTzLabel(getClientTimeZoneInfo().tzLabel);
+  }, []);
+
+  useEffect(() => {
+    if (isOpen && !wasOpenRef.current) {
+      const todayYmd = getLocalYmd();
       setTitle('');
-      setDate(getTodayMytYmd());
+      setDate(todayYmd);
+      setEndDate(todayYmd);
       setStartHour('09:00');
       setEndHour('10:00');
       setIsAllDay(false);
@@ -56,7 +59,15 @@ export function NewEventModal({
         setCalendarName(personalCal || availableCalendars[0]);
       }
     }
+    wasOpenRef.current = isOpen;
   }, [isOpen, availableCalendars]);
+
+  useEffect(() => {
+    if (isOpen && !calendarName && availableCalendars.length > 0) {
+      const personalCal = availableCalendars.find(c => c.toLowerCase() === 'personal');
+      setCalendarName(personalCal || availableCalendars[0]);
+    }
+  }, [isOpen, availableCalendars, calendarName]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -73,7 +84,12 @@ export function NewEventModal({
     e.preventDefault();
     if (!title.trim() || isSubmitting) return;
 
-    if (!isAllDay && endHour <= startHour) {
+    if (isAllDay) {
+      if (endDate && endDate < date) {
+        setError('End date cannot be before start date.');
+        return;
+      }
+    } else if (endHour <= startHour) {
       setError('End time must be after start time.');
       return;
     }
@@ -82,17 +98,20 @@ export function NewEventModal({
     setError('');
 
     try {
+      const effectiveEndDate = endDate && endDate >= date ? endDate : date;
       const startIso = isAllDay
-        ? `${date}T00:00:00+08:00`
-        : `${date}T${startHour}:00+08:00`;
+        ? toLocalIsoWithOffset(date, '00:00')
+        : toLocalIsoWithOffset(date, startHour);
       const endIso = isAllDay
-        ? `${date}T23:59:00+08:00`
-        : `${date}T${endHour}:00+08:00`;
+        ? toLocalIsoWithOffset(effectiveEndDate, '23:59')
+        : toLocalIsoWithOffset(date, endHour);
 
       await onSubmit({
         title: title.trim(),
         startTime: startIso,
         endTime: endIso,
+        startDate: isAllDay ? date : undefined,
+        endDate: isAllDay ? effectiveEndDate : undefined,
         isAllDay,
         location: location.trim() || undefined,
         calendarName: calendarName || undefined,
@@ -147,18 +166,40 @@ export function NewEventModal({
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-medium text-zinc-400 mb-1.5">
-                Date
+                {isAllDay ? 'Start Date' : 'Date'}
               </label>
               <input
                 type="date"
                 value={date}
-                onChange={e => setDate(e.target.value)}
+                onChange={e => {
+                  const next = e.target.value;
+                  setDate(next);
+                  if (!endDate || endDate < next) setEndDate(next);
+                  setError('');
+                }}
                 required
                 className="w-full px-3 py-2 rounded-xl bg-zinc-950 border border-zinc-800 focus:border-zinc-500 focus:outline-none text-xs text-white transition-colors"
               />
             </div>
 
-            {availableCalendars.length > 0 && (
+            {isAllDay ? (
+              <div>
+                <label className="block text-xs font-medium text-zinc-400 mb-1.5">
+                  End Date
+                </label>
+                <input
+                  type="date"
+                  value={endDate || date}
+                  min={date}
+                  onChange={e => {
+                    setEndDate(e.target.value);
+                    setError('');
+                  }}
+                  required
+                  className="w-full px-3 py-2 rounded-xl bg-zinc-950 border border-zinc-800 focus:border-zinc-500 focus:outline-none text-xs text-white transition-colors"
+                />
+              </div>
+            ) : availableCalendars.length > 0 ? (
               <div>
                 <label className="block text-xs font-medium text-zinc-400 mb-1.5">
                   Calendar
@@ -175,16 +216,39 @@ export function NewEventModal({
                   ))}
                 </select>
               </div>
-            )}
+            ) : null}
           </div>
+
+          {isAllDay && availableCalendars.length > 0 && (
+            <div>
+              <label className="block text-xs font-medium text-zinc-400 mb-1.5">
+                Calendar
+              </label>
+              <select
+                value={calendarName}
+                onChange={e => setCalendarName(e.target.value)}
+                className="w-full px-3 py-2 rounded-xl bg-zinc-950 border border-zinc-800 focus:border-zinc-500 focus:outline-none text-xs text-white transition-colors"
+              >
+                {availableCalendars.map(cal => (
+                  <option key={cal} value={cal}>
+                    {cal}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           <label className="flex items-center gap-2 text-xs text-zinc-300 cursor-pointer select-none">
             <input
               type="checkbox"
               checked={isAllDay}
               onChange={e => {
-                setIsAllDay(e.target.checked);
-                if (e.target.checked) setError('');
+                const next = e.target.checked;
+                setIsAllDay(next);
+                if (next) {
+                  if (!endDate || endDate < date) setEndDate(date);
+                  setError('');
+                }
               }}
               className="rounded border-zinc-700 bg-zinc-950 text-white focus:ring-zinc-500"
             />
@@ -195,7 +259,7 @@ export function NewEventModal({
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs font-medium text-zinc-400 mb-1.5">
-                  Start (MYT)
+                  Start ({tzLabel})
                 </label>
                 <input
                   type="time"
@@ -210,7 +274,7 @@ export function NewEventModal({
               </div>
               <div>
                 <label className="block text-xs font-medium text-zinc-400 mb-1.5">
-                  End (MYT)
+                  End ({tzLabel})
                 </label>
                 <input
                   type="time"

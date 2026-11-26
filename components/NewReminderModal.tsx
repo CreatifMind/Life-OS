@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { X, CheckSquare, Loader2 } from 'lucide-react';
+import { getClientTimeZoneInfo, toLocalIsoWithOffset } from '@/lib/client';
 
 interface NewReminderModalProps {
   isOpen: boolean;
@@ -24,6 +25,11 @@ export function NewReminderModal({
   const [notes, setNotes] = useState(initialNotes);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const [tzLabel, setTzLabel] = useState('MYT');
+
+  useEffect(() => {
+    setTzLabel(getClientTimeZoneInfo().tzLabel);
+  }, []);
 
   useEffect(() => {
     if (isOpen) {
@@ -57,7 +63,7 @@ export function NewReminderModal({
       let isoDue: string | undefined;
       if (dueDate) {
         const timePart = dueTime || '09:00';
-        isoDue = `${dueDate}T${timePart}:00+08:00`;
+        isoDue = toLocalIsoWithOffset(dueDate, timePart);
       }
 
       await onSubmit(title.trim(), isoDue, notes.trim() || undefined);
@@ -127,7 +133,7 @@ export function NewReminderModal({
 
             <div>
               <label className="block text-xs font-medium text-zinc-400 mb-1.5">
-                Time (MYT, optional)
+                Time ({tzLabel}, optional)
               </label>
               <input
                 type="time"

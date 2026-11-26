@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { Sparkles, Volume2, RefreshCw, AlertTriangle, ChevronDown, ChevronUp, Calendar, CheckSquare, Mail, Target } from 'lucide-react';
 import { DailyBriefing } from '@/lib/types';
+import { getClientTimeZoneInfo } from '@/lib/client';
 
 function formatBulletText(text?: string): string {
   if (!text) return '';
@@ -20,6 +21,11 @@ interface DailyBriefingCardProps {
 export function DailyBriefingCard({ briefing, isLoading }: DailyBriefingCardProps) {
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
   const [isExpanded, setIsExpanded] = useState(true);
+  const [tzLabel, setTzLabel] = useState('MYT');
+
+  useEffect(() => {
+    setTzLabel(getClientTimeZoneInfo().tzLabel);
+  }, []);
 
   const getSourceIcon = (source: string) => {
     switch (source) {
@@ -87,7 +93,7 @@ export function DailyBriefingCard({ briefing, isLoading }: DailyBriefingCardProp
           <Sparkles className="w-4 h-4 text-zinc-300" />
           <h2 className="text-sm font-medium text-white tracking-tight">Daily Briefing</h2>
           <span className="text-xs text-zinc-500">
-            · {briefing ? new Date(briefing.generatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '8:00 AM'} MYT
+            · {briefing ? new Date(briefing.generatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '8:00 AM'} {tzLabel}
           </span>
         </div>
 
@@ -133,7 +139,7 @@ export function DailyBriefingCard({ briefing, isLoading }: DailyBriefingCardProp
         <div className="grid md:grid-cols-3 divide-y md:divide-y-0 md:divide-x divide-zinc-800/70 border-t border-zinc-800/70 pt-3.5 mb-3.5">
           {briefing.topPriorities.slice(0, 3).map((p, idx) => (
             <div
-              key={p.rank}
+              key={`${p.rank}-${idx}`}
               className={`flex items-start gap-2.5 py-2 md:py-0 ${
                 idx === 0 ? 'md:pr-4' : idx === 1 ? 'md:px-4' : 'md:pl-4'
               }`}

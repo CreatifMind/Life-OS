@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
-import { markAppleReminderComplete, fetchLiveReminders } from '@/lib/caldav';
-import { addPendingReminder } from '@/lib/db';
+import { fetchLiveReminders } from '@/lib/caldav';
+import { addPendingReminder, updateSyncedReminderStatus } from '@/lib/db';
 
 export async function GET() {
   try {
@@ -36,13 +36,23 @@ export async function POST(req: Request) {
 export async function PATCH(req: Request) {
   try {
     const body = await req.json();
-    const { uid, isCompleted } = body;
+    const { uid, isCompleted, title, listName, dueDate, notes } = body || {};
 
     if (!uid) {
       return NextResponse.json({ success: false, error: 'Task UID is required' }, { status: 400 });
     }
 
-    await markAppleReminderComplete(uid, Boolean(isCompleted));
+    const updated = await updateSyncedReminderStatus(String(uid), Boolean(isCompleted));
+    if (!updated && !isCompleted && title) {
+      const restoredTask = await addPendingReminder({
+        title: String(title),
+        listName: listName ? String(listName) : 'Reminders',
+        dueDate: dueDate ? String(dueDate) : undefined,
+        notes: notes ? String(notes) : undefined,
+      });
+      return NextResponse.json({ success: true, restoredTask });
+    }
+
     return NextResponse.json({ success: true });
   } catch (err: any) {
     return NextResponse.json({ success: false, error: err.message }, { status: 500 });
@@ -52,7 +62,7 @@ export async function PATCH(req: Request) {
 export async function PUT(req: Request) {
   try {
     const body = await req.json();
-    const { oldTitle, title, listName, dueDate, notes } = body || {};
+    const { oldTitle, title, listName, dueDate, clearDueDate, notes, clearNotes } = body || {};
 
     if (!title || !String(title).trim()) {
       return NextResponse.json({ success: false, error: 'Title is required' }, { status: 400 });
@@ -62,8 +72,10 @@ export async function PUT(req: Request) {
       title: String(title),
       replaceTitle: oldTitle ? String(oldTitle) : String(title),
       listName: listName ? String(listName) : 'Reminders',
-      dueDate: dueDate ? String(dueDate) : undefined,
-      notes: notes ? String(notes) : undefined,
+      dueDate: !clearDueDate && dueDate ? String(dueDate) : undefined,
+      clearDueDate: Boolean(clearDueDate),
+      notes: !clearNotes && notes ? String(notes) : undefined,
+      clearNotes: Boolean(clearNotes),
     });
 
     return NextResponse.json({ success: true, task });

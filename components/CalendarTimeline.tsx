@@ -1,8 +1,9 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Calendar as CalendarIcon, Clock, MapPin, CalendarDays, Sparkles, Layers, Plus } from 'lucide-react';
+import { Calendar as CalendarIcon, Clock, MapPin, CalendarDays, Layers, Plus, Repeat } from 'lucide-react';
 import { CalendarEvent } from '@/lib/types';
+import { getEventAllDayRange, parseYmdLocal } from '@/lib/client';
 
 interface CalendarTimelineProps {
   events: CalendarEvent[];
@@ -49,17 +50,21 @@ export function CalendarTimeline({ events, isLoading, onOpenNewEventModal, onSel
   const expandedItems: ExpandedTimelineItem[] = [];
 
   for (const event of events) {
-    const start = new Date(event.startTime);
-    let end = new Date(event.endTime || event.startTime);
+    let startMidnight: Date;
+    let endMidnight: Date;
 
-    // Normalize start/end to midnight for day comparison
-    const startMidnight = new Date(start.getFullYear(), start.getMonth(), start.getDate());
-    let endMidnight = new Date(end.getFullYear(), end.getMonth(), end.getDate());
-
-    // In iCalendar, an all-day event DTEND is exclusive.
-    // e.g. 2026-11-16 to 2026-11-18 means 16th and 17th.
-    if (event.isAllDay && end.getTime() > start.getTime()) {
-      endMidnight = new Date(endMidnight.getTime() - 1000 * 60 * 60 * 24);
+    if (event.isAllDay) {
+      const { startYmd, endYmd } = getEventAllDayRange(event);
+      startMidnight = parseYmdLocal(startYmd);
+      endMidnight = parseYmdLocal(endYmd);
+    } else {
+      const start = new Date(event.startTime);
+      const end = new Date(event.endTime || event.startTime);
+      startMidnight = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+      endMidnight = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+      if (endMidnight.getTime() < startMidnight.getTime()) {
+        endMidnight = startMidnight;
+      }
     }
 
     const diffDays = Math.max(
@@ -69,7 +74,7 @@ export function CalendarTimeline({ events, isLoading, onOpenNewEventModal, onSel
 
     const isMultiDay = diffDays > 1;
     const dateRangeLabel = isMultiDay
-      ? `${start.toLocaleDateString([], { day: 'numeric', month: 'short' })} – ${endMidnight.toLocaleDateString([], {
+      ? `${startMidnight.toLocaleDateString([], { day: 'numeric', month: 'short' })} – ${endMidnight.toLocaleDateString([], {
           day: 'numeric',
           month: 'short',
         })} (${diffDays} Days)`
@@ -77,7 +82,11 @@ export function CalendarTimeline({ events, isLoading, onOpenNewEventModal, onSel
 
     // Generate entry for each day the event spans
     for (let dayOffset = 0; dayOffset < diffDays; dayOffset++) {
-      const currentDay = new Date(startMidnight.getTime() + dayOffset * 24 * 60 * 60 * 1000);
+      const currentDay = new Date(
+        startMidnight.getFullYear(),
+        startMidnight.getMonth(),
+        startMidnight.getDate() + dayOffset
+      );
       const dateKey = currentDay.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
 
       expandedItems.push({
@@ -228,6 +237,15 @@ export function CalendarTimeline({ events, isLoading, onOpenNewEventModal, onSel
                               <span className="flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-300 border border-purple-500/30 uppercase tracking-wider">
                                 <Layers className="w-2.5 h-2.5" />
                                 Day {item.multiDayDayNumber}/{item.totalDays}
+                              </span>
+                            )}
+                            {event.isRecurring && (
+                              <span
+                                className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded bg-zinc-900 text-zinc-400 border border-zinc-800 uppercase tracking-wider"
+                                title="Recurring series (read-only in Life OS)"
+                              >
+                                <Repeat className="w-2.5 h-2.5" />
+                                Recurring
                               </span>
                             )}
                           </div>

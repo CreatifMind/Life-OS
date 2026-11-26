@@ -7,7 +7,7 @@ export const maxDuration = 30;
 export async function GET() {
   try {
     const [eventsResult, remindersResult, emailsResult, accountsResult, sendScopeResult] = await Promise.allSettled([
-      fetchLiveCalendarEvents(),
+      fetchLiveCalendarEvents(14, 60),
       fetchLiveReminders(),
       fetchRecentEmails(10),
       getConnectedGoogleAccounts(),

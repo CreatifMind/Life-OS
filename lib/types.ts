@@ -5,10 +5,19 @@ export interface CalendarEvent {
   calendarColor?: string;
   startTime: string; // ISO string
   endTime: string;   // ISO string
+  startDate?: string; // YYYY-MM-DD (all-day events)
+  endDate?: string;   // YYYY-MM-DD (inclusive all-day end date)
   isAllDay: boolean;
+  isRecurring?: boolean;
   location?: string;
   description?: string;
   url?: string;
+}
+
+export interface AssistantActionReceipt {
+  status: 'success' | 'error' | 'skipped';
+  label: string;
+  detail?: string;
 }
 
 export interface ReminderTask {

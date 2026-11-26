@@ -1,21 +1,24 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Sparkles, X, Send, Bot, User, Loader2, RotateCcw } from 'lucide-react';
+import { Sparkles, X, Send, Bot, User, Loader2, RotateCcw, Check, AlertCircle, Info } from 'lucide-react';
 
-import { CalendarEvent, ReminderTask } from '@/lib/types';
+import { AssistantActionReceipt, CalendarEvent, ReminderTask } from '@/lib/types';
+import { getClientTimeZoneInfo, safeFetchJson } from '@/lib/client';
 
 interface Message {
   role: 'user' | 'model';
   text: string;
+  receipts?: AssistantActionReceipt[];
+  isError?: boolean;
 }
 
 interface LifeAssistantDrawerProps {
-  onReminderCreated?: (reminder?: ReminderTask, needsFullRefresh?: boolean) => void;
-  onEventCreated?: (event?: CalendarEvent, needsFullRefresh?: boolean) => void;
+  onRemindersMutated?: (reminders?: ReminderTask[], needsFullRefresh?: boolean) => void;
+  onEventsMutated?: (events?: CalendarEvent[], needsFullRefresh?: boolean) => void;
 }
 
-export function LifeAssistantDrawer({ onReminderCreated, onEventCreated }: LifeAssistantDrawerProps) {
+export function LifeAssistantDrawer({ onRemindersMutated, onEventsMutated }: LifeAssistantDrawerProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<Message[]>([
@@ -68,32 +71,70 @@ export function LifeAssistantDrawer({ onReminderCreated, onEventCreated }: LifeA
     setIsLoading(true);
 
     try {
-      const history = messages.slice(1); // skip greeting
-      const res = await fetch('/api/assistant/chat', {
+      const history = messages
+        .slice(1)
+        .filter(m => !m.isError)
+        .slice(-12)
+        .map(m => ({ role: m.role, text: m.text }));
+
+      const { timeZone, utcOffset } = getClientTimeZoneInfo();
+
+      const data = await safeFetchJson<{
+        success: boolean;
+        reply?: string;
+        error?: string;
+        actionResults?: AssistantActionReceipt[];
+        createdEvents?: CalendarEvent[];
+        createdEvent?: CalendarEvent | null;
+        mutatedCalendar?: boolean;
+        createdReminders?: ReminderTask[];
+        createdReminder?: ReminderTask | null;
+        mutatedReminders?: boolean;
+      }>('/api/assistant/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: q, history }),
+        body: JSON.stringify({ message: q, history, timeZone, utcOffset }),
       });
 
-      const data = await res.json();
-      if (data.success && data.reply) {
-        setMessages(prev => [...prev, { role: 'model', text: data.reply }]);
-        if (data.createdReminder || data.mutatedReminders) {
-          onReminderCreated?.(data.createdReminder, Boolean(data.mutatedReminders));
+      if (data.reply) {
+        setMessages(prev => [
+          ...prev,
+          {
+            role: 'model',
+            text: data.reply!,
+            receipts: Array.isArray(data.actionResults) && data.actionResults.length > 0
+              ? data.actionResults
+              : undefined,
+          },
+        ]);
+
+        const createdRems = Array.isArray(data.createdReminders) && data.createdReminders.length > 0
+          ? data.createdReminders
+          : data.createdReminder
+          ? [data.createdReminder]
+          : [];
+        if (createdRems.length > 0 || data.mutatedReminders) {
+          onRemindersMutated?.(createdRems, Boolean(data.mutatedReminders));
         }
-        if (data.createdEvent || data.mutatedCalendar) {
-          onEventCreated?.(data.createdEvent, Boolean(data.mutatedCalendar));
+
+        const createdEvts = Array.isArray(data.createdEvents) && data.createdEvents.length > 0
+          ? data.createdEvents
+          : data.createdEvent
+          ? [data.createdEvent]
+          : [];
+        if (createdEvts.length > 0 || data.mutatedCalendar) {
+          onEventsMutated?.(createdEvts, Boolean(data.mutatedCalendar));
         }
       } else {
         setMessages(prev => [
           ...prev,
-          { role: 'model', text: `Sorry, I encountered an issue: ${data.error || 'Unknown error'}` },
+          { role: 'model', text: `Sorry, I encountered an issue: ${data.error || 'Empty response'}`, isError: true },
         ]);
       }
     } catch (err: any) {
       setMessages(prev => [
         ...prev,
-        { role: 'model', text: `Connection error: ${err.message}` },
+        { role: 'model', text: err?.message || 'Connection error. Please try again.', isError: true },
       ]);
     } finally {
       setIsLoading(false);
@@ -165,14 +206,45 @@ export function LifeAssistantDrawer({ onReminderCreated, onEventCreated }: LifeA
                     </div>
                   )}
 
-                  <div
-                    className={`p-3 rounded-2xl max-w-[85%] leading-relaxed whitespace-pre-wrap ${
-                      m.role === 'user'
-                        ? 'bg-white text-zinc-950 font-medium rounded-br-none'
-                        : 'bg-[#111114] border border-zinc-800/80 text-zinc-200 rounded-bl-none'
-                    }`}
-                  >
-                    {m.text}
+                  <div className="max-w-[85%] space-y-1.5">
+                    <div
+                      className={`p-3 rounded-2xl leading-relaxed whitespace-pre-wrap ${
+                        m.role === 'user'
+                          ? 'bg-white text-zinc-950 font-medium rounded-br-none'
+                          : m.isError
+                          ? 'bg-rose-500/10 border border-rose-500/30 text-rose-200 rounded-bl-none'
+                          : 'bg-[#111114] border border-zinc-800/80 text-zinc-200 rounded-bl-none'
+                      }`}
+                    >
+                      {m.text}
+                    </div>
+
+                    {m.receipts && m.receipts.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 pl-0.5">
+                        {m.receipts.map((rc, rIdx) => (
+                          <span
+                            key={rIdx}
+                            title={rc.detail || rc.label}
+                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-medium border ${
+                              rc.status === 'success'
+                                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                                : rc.status === 'error'
+                                ? 'bg-rose-500/10 border-rose-500/30 text-rose-300'
+                                : 'bg-amber-500/10 border-amber-500/30 text-amber-300'
+                            }`}
+                          >
+                            {rc.status === 'success' ? (
+                              <Check className="w-2.5 h-2.5 shrink-0" />
+                            ) : rc.status === 'error' ? (
+                              <AlertCircle className="w-2.5 h-2.5 shrink-0" />
+                            ) : (
+                              <Info className="w-2.5 h-2.5 shrink-0" />
+                            )}
+                            <span className="truncate max-w-[220px]">{rc.label}</span>
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </div>
 
                   {m.role === 'user' && (
@@ -185,7 +257,7 @@ export function LifeAssistantDrawer({ onReminderCreated, onEventCreated }: LifeA
 
               {isLoading && (
                 <div className="flex items-center gap-2 text-xs text-zinc-500 pl-8">
-                  <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-400" />
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-zinc-300" />
                   <span>Reviewing schedule and tasks...</span>
                 </div>
               )}
@@ -193,7 +265,7 @@ export function LifeAssistantDrawer({ onReminderCreated, onEventCreated }: LifeA
               <div ref={messagesEndRef} />
             </div>
 
-            {/* Suggested Prompt Pills (only if 1 message or user asked something) */}
+            {/* Suggested Prompt Pills */}
             <div className="px-4 py-2 border-t border-zinc-900 flex gap-1.5 overflow-x-auto no-scrollbar">
               {suggestedPrompts.map((prompt, i) => (
                 <button

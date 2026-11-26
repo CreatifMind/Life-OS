@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, Mail, Check, Archive, CheckSquare, Send, Sparkles, Loader2, Paperclip, Reply } from 'lucide-react';
 import { EmailThread } from '@/lib/types';
+import { safeFetchJson } from '@/lib/client';
 
 interface EmailAttachment {
   attachmentId: string;
@@ -96,18 +97,17 @@ export function EmailDetailModal({
     const params = new URLSearchParams({ id: email.id });
     if (email.accountEmail) params.set('account', email.accountEmail);
 
-    fetch(`/api/gmail/message?${params.toString()}`)
-      .then(res => res.json())
+    safeFetchJson<{ success: boolean; detail?: EmailDetail; error?: string }>(`/api/gmail/message?${params.toString()}`)
       .then(data => {
         if (cancelled) return;
-        if (data.success && data.detail) {
+        if (data.detail) {
           setDetail(data.detail);
         } else {
           setError(data.error || 'Failed to load full email');
         }
       })
-      .catch(() => {
-        if (!cancelled) setError('Network error loading email');
+      .catch((err: any) => {
+        if (!cancelled) setError(err?.message || 'Network error loading email');
       })
       .finally(() => {
         if (!cancelled) setIsLoading(false);
@@ -133,7 +133,7 @@ export function EmailDetailModal({
     setIsActing(true);
     setError('');
     try {
-      const res = await fetch('/api/gmail/message', {
+      await safeFetchJson('/api/gmail/message', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -142,16 +142,10 @@ export function EmailDetailModal({
           accountEmail: email.accountEmail,
         }),
       });
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        setError(data.error || 'Action failed');
-        setIsActing(false);
-        return;
-      }
       onEmailCleared(email.id);
       onClose();
-    } catch {
-      setError('Failed to update email');
+    } catch (err: any) {
+      setError(err?.message || 'Failed to update email');
       setIsActing(false);
     }
   };
@@ -160,7 +154,7 @@ export function EmailDetailModal({
     setIsDrafting(true);
     setError('');
     try {
-      const res = await fetch('/api/gmail/message', {
+      const data = await safeFetchJson<{ success: boolean; draft?: string; error?: string }>('/api/gmail/message', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -171,14 +165,13 @@ export function EmailDetailModal({
           emailBody: detail?.body || email.snippet,
         }),
       });
-      const data = await res.json();
-      if (data.success && data.draft) {
+      if (data.draft) {
         setReplyText(data.draft);
       } else {
         setError(data.error || 'Could not draft reply');
       }
-    } catch {
-      setError('Failed to draft reply');
+    } catch (err: any) {
+      setError(err?.message || 'Failed to draft reply');
     } finally {
       setIsDrafting(false);
     }
@@ -191,7 +184,7 @@ export function EmailDetailModal({
     setError('');
 
     try {
-      const res = await fetch('/api/gmail/message', {
+      await safeFetchJson('/api/gmail/message', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -205,17 +198,11 @@ export function EmailDetailModal({
           replyBody: replyText.trim(),
         }),
       });
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        setError(data.error || 'Failed to send reply');
-        setIsSending(false);
-        return;
-      }
       setStatusMessage('Reply sent!');
       onEmailCleared(email.id);
       setTimeout(() => onClose(), 800);
-    } catch {
-      setError('Network error sending reply');
+    } catch (err: any) {
+      setError(err?.message || 'Network error sending reply');
       setIsSending(false);
     }
   };
