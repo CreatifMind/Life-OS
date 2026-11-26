@@ -11,7 +11,13 @@ interface GmailTriageWidgetProps {
   onSelectEmail?: (email: EmailThread) => void;
   onMarkRead?: (email: EmailThread) => void;
   onDisconnectAccount?: (email: string) => void;
-  health?: { status: string; message?: string; accounts?: string[]; emailSendReady?: boolean };
+  health?: {
+    status: string;
+    message?: string;
+    accounts?: string[];
+    emailSendReady?: boolean;
+    failedAccounts?: Array<{ email: string; error: string }>;
+  };
 }
 
 function shortAccountLabel(email: string): string {
@@ -48,6 +54,8 @@ export function GmailTriageWidget({
   const [confirmDisconnect, setConfirmDisconnect] = useState<string | null>(null);
   const isError = health?.status === 'ERROR';
   const accounts = health?.accounts || [];
+  const failedAccounts = health?.failedAccounts || [];
+  const failedEmailSet = new Set(failedAccounts.map(f => f.email.toLowerCase()));
 
   useEffect(() => {
     if (!confirmDisconnect) return;
@@ -136,10 +144,13 @@ export function GmailTriageWidget({
                   <>
                     <button
                       onClick={() => setSelectedAccount(active ? 'all' : acc)}
-                      title={acc}
-                      className="truncate max-w-[110px]"
+                      title={failedEmailSet.has(acc.toLowerCase()) ? `${acc} (needs reconnect)` : acc}
+                      className="inline-flex items-center gap-1.5 truncate max-w-[125px]"
                     >
-                      {shortAccountLabel(acc)}
+                      {failedEmailSet.has(acc.toLowerCase()) && (
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" />
+                      )}
+                      <span className="truncate">{shortAccountLabel(acc)}</span>
                     </button>
                     {onDisconnectAccount && accounts.length > 1 && (
                       <button
@@ -162,6 +173,23 @@ export function GmailTriageWidget({
           })}
         </div>
       )}
+
+      {!isError && failedAccounts.map(failed => (
+        <div
+          key={failed.email}
+          className="mb-2.5 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-between gap-2"
+        >
+          <span className="text-[11px] text-amber-300 truncate" title={failed.error}>
+            <span className="font-semibold">{shortAccountLabel(failed.email)}</span> ({failed.email}) expired or disconnected.
+          </span>
+          <a
+            href={`/api/auth/google/url?login_hint=${encodeURIComponent(failed.email)}`}
+            className="shrink-0 px-2 py-1 rounded-md bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 text-[10px] font-medium transition-colors"
+          >
+            Reconnect
+          </a>
+        </div>
+      ))}
 
       {health?.status === 'OK' && health?.emailSendReady === false && (
         <div className="mb-3 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-between gap-2">
@@ -199,15 +227,33 @@ export function GmailTriageWidget({
           </a>
         </div>
       ) : filteredEmails.length === 0 ? (
-        <div className="flex-1 flex flex-col items-center justify-center py-10 text-center">
-          <div className="w-9 h-9 rounded-full bg-zinc-800/50 flex items-center justify-center text-zinc-500 mb-2.5">
-            <Inbox className="w-4 h-4" />
+        selectedAccount !== 'all' && failedEmailSet.has(selectedAccount.toLowerCase()) ? (
+          <div className="flex-1 flex flex-col items-center justify-center py-8 px-3 text-center">
+            <div className="w-9 h-9 rounded-full bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400 mb-2.5">
+              <Mail className="w-4 h-4" />
+            </div>
+            <p className="text-xs font-medium text-white mb-1">{shortAccountLabel(selectedAccount)} Disconnected</p>
+            <p className="text-[11px] text-zinc-500 max-w-[230px] mb-3.5 leading-relaxed">
+              Session expired or revoked for {selectedAccount}.
+            </p>
+            <a
+              href={`/api/auth/google/url?login_hint=${encodeURIComponent(selectedAccount)}`}
+              className="px-3.5 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 text-xs font-medium transition-colors"
+            >
+              Reconnect {shortAccountLabel(selectedAccount)}
+            </a>
           </div>
-          <p className="text-xs font-medium text-zinc-300">Inbox Zero</p>
-          <p className="text-[11px] text-zinc-500 max-w-[200px] mt-0.5">
-            No unread Primary emails.
-          </p>
-        </div>
+        ) : (
+          <div className="flex-1 flex flex-col items-center justify-center py-10 text-center">
+            <div className="w-9 h-9 rounded-full bg-zinc-800/50 flex items-center justify-center text-zinc-500 mb-2.5">
+              <Inbox className="w-4 h-4" />
+            </div>
+            <p className="text-xs font-medium text-zinc-300">Inbox Zero</p>
+            <p className="text-[11px] text-zinc-500 max-w-[200px] mt-0.5">
+              No unread Primary emails.
+            </p>
+          </div>
+        )
       ) : (
         <div className="divide-y divide-zinc-800/60 flex-1 overflow-y-auto overflow-x-hidden touch-pan-y overscroll-x-none max-h-[380px] pr-1">
           {filteredEmails.map(email => (

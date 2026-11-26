@@ -42,12 +42,23 @@ export async function GET(req: NextRequest) {
     const grantedScopes = data.scope || '';
     const accountEmail = await fetchGoogleAccountEmail(data.access_token);
 
-    // Save into multi-account store in Supabase (upserts by email without overwriting other accounts)
-    await saveConnectedGoogleAccount(accountEmail, refreshToken);
+    if (!accountEmail || !accountEmail.includes('@')) {
+      return NextResponse.redirect(
+        new URL(`/?auth=failed&error=${encodeURIComponent('Could not resolve Google account email address')}`, req.url)
+      );
+    }
 
-    // Keep legacy GOOGLE_REFRESH_TOKEN populated if empty
+    // Save into multi-account store in Supabase (upserts by email without overwriting other accounts)
+    const updatedAccounts = await saveConnectedGoogleAccount(accountEmail, refreshToken);
+
+    // Keep legacy GOOGLE_REFRESH_TOKEN aligned with a live account token
     const existingLegacy = await getAppSetting('GOOGLE_REFRESH_TOKEN');
-    if (!existingLegacy) {
+    const normalizedEmail = accountEmail.trim().toLowerCase();
+    const isPrimarySlot = updatedAccounts.length === 1 || updatedAccounts[0]?.email.toLowerCase() === normalizedEmail;
+    const legacyStillConnected = existingLegacy
+      ? updatedAccounts.some(a => a.refreshToken === existingLegacy)
+      : false;
+    if (!existingLegacy || isPrimarySlot || !legacyStillConnected) {
       await saveAppSetting('GOOGLE_REFRESH_TOKEN', refreshToken);
     }
 

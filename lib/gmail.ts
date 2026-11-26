@@ -39,35 +39,61 @@ export async function fetchGoogleAccountEmail(accessToken: string): Promise<stri
 export async function getConnectedGoogleAccounts(): Promise<ConnectedGmailAccount[]> {
   const raw = await getAppSetting('GOOGLE_ACCOUNTS');
   let accounts: ConnectedGmailAccount[] = [];
+  let shouldPersistCleanup = false;
+
   if (raw) {
     try {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) {
-        accounts = parsed.filter((a: any) => a && typeof a.email === 'string' && typeof a.refreshToken === 'string');
+        const seen = new Set<string>();
+        const cleaned: ConnectedGmailAccount[] = [];
+        for (const a of parsed) {
+          if (!a || typeof a.email !== 'string' || typeof a.refreshToken !== 'string') {
+            shouldPersistCleanup = true;
+            continue;
+          }
+          const email = a.email.trim().toLowerCase();
+          // Purge corrupt 'Primary' or non-email placeholder entries
+          if (!email.includes('@') || !a.refreshToken) {
+            shouldPersistCleanup = true;
+            continue;
+          }
+          if (seen.has(email)) {
+            shouldPersistCleanup = true;
+            const idx = cleaned.findIndex(item => item.email.toLowerCase() === email);
+            if (idx >= 0) cleaned[idx] = { ...a, email };
+            continue;
+          }
+          seen.add(email);
+          cleaned.push({ ...a, email });
+        }
+        accounts = cleaned;
       }
     } catch {}
   }
 
-  // Backward-compatibility: include legacy GOOGLE_REFRESH_TOKEN if not already represented
+  // Backward-compatibility: only promote legacy GOOGLE_REFRESH_TOKEN if it actually refreshes to a real email
   const legacyDbToken = await getAppSetting('GOOGLE_REFRESH_TOKEN');
   const legacyToken = legacyDbToken || process.env.GOOGLE_REFRESH_TOKEN || REFRESH_TOKEN;
   if (legacyToken && !accounts.some(a => a.refreshToken === legacyToken)) {
-    let email = 'Primary';
     try {
       const accessToken = await getFreshAccessToken(legacyToken);
-      email = await fetchGoogleAccountEmail(accessToken);
-    } catch {}
-
-    if (!accounts.some(a => a.email.toLowerCase() === email.toLowerCase())) {
-      accounts.unshift({
-        email,
-        refreshToken: legacyToken,
-        addedAt: new Date().toISOString(),
-      });
-      if (email !== 'Primary') {
-        await saveAppSetting('GOOGLE_ACCOUNTS', JSON.stringify(accounts));
+      const resolvedEmail = (await fetchGoogleAccountEmail(accessToken)).trim().toLowerCase();
+      if (resolvedEmail.includes('@') && !accounts.some(a => a.email.toLowerCase() === resolvedEmail)) {
+        accounts.unshift({
+          email: resolvedEmail,
+          refreshToken: legacyToken,
+          addedAt: new Date().toISOString(),
+        });
+        shouldPersistCleanup = true;
       }
+    } catch {
+      // Legacy token is expired/invalid; never re-inject as a fake 'Primary' account
     }
+  }
+
+  if (shouldPersistCleanup) {
+    await saveAppSetting('GOOGLE_ACCOUNTS', JSON.stringify(accounts));
   }
 
   return accounts;
@@ -117,8 +143,13 @@ export async function getFreshAccessToken(refreshTokenOverride?: string): Promis
     if (raw) {
       try {
         const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed) && parsed[0]?.refreshToken) {
-          activeRefreshToken = parsed[0].refreshToken;
+        if (Array.isArray(parsed)) {
+          const valid = parsed.find(
+            (a: any) => a && typeof a.email === 'string' && a.email.includes('@') && typeof a.refreshToken === 'string' && a.refreshToken
+          );
+          if (valid?.refreshToken) {
+            activeRefreshToken = valid.refreshToken;
+          }
         }
       } catch {}
     }
@@ -189,7 +220,7 @@ export async function hasGmailSendScope(): Promise<boolean> {
     );
 
     const results = checks.map(c => (c.status === 'fulfilled' ? c.value : false));
-    return results.length > 0 && results.every(Boolean);
+    return results.some(Boolean);
   } catch {
     return false;
   }
@@ -589,36 +620,57 @@ async function fetchEmailsForAccount(account: ConnectedGmailAccount, maxResults:
   return threads;
 }
 
+export interface FailedGmailAccount {
+  email: string;
+  error: string;
+}
+
+export interface FetchEmailsWithStatusResult {
+  threads: EmailThread[];
+  failedAccounts: FailedGmailAccount[];
+  totalAccounts: number;
+}
+
+export async function fetchRecentEmailsWithStatus(maxResults = 10): Promise<FetchEmailsWithStatusResult> {
+  const accounts = await getConnectedGoogleAccounts();
+  if (accounts.length === 0) {
+    throw new Error('No Google accounts connected');
+  }
+
+  const perAccountLimit = maxResults;
+  const results = await Promise.allSettled(
+    accounts.map(acc => fetchEmailsForAccount(acc, perAccountLimit))
+  );
+
+  const allThreads: EmailThread[] = [];
+  const failedAccounts: FailedGmailAccount[] = [];
+
+  results.forEach((res, idx) => {
+    const acc = accounts[idx];
+    if (res.status === 'fulfilled') {
+      allThreads.push(...res.value);
+    } else {
+      failedAccounts.push({
+        email: acc.email,
+        error: res.reason?.message || 'Failed to fetch account',
+      });
+    }
+  });
+
+  const threads = allThreads
+    .sort((a, b) => new Date(b.receivedAt).getTime() - new Date(a.receivedAt).getTime())
+    .slice(0, Math.max(maxResults, 15));
+
+  return { threads, failedAccounts, totalAccounts: accounts.length };
+}
+
 export async function fetchRecentEmails(maxResults = 10): Promise<EmailThread[]> {
   try {
-    const accounts = await getConnectedGoogleAccounts();
-    if (accounts.length === 0) {
-      throw new Error('No Google accounts connected');
+    const { threads, failedAccounts, totalAccounts } = await fetchRecentEmailsWithStatus(maxResults);
+    if (threads.length === 0 && failedAccounts.length === totalAccounts) {
+      throw new Error(failedAccounts.map(f => `${f.email}: ${f.error}`).join('; '));
     }
-
-    const perAccountLimit = maxResults;
-    const results = await Promise.allSettled(
-      accounts.map(acc => fetchEmailsForAccount(acc, perAccountLimit))
-    );
-
-    const allThreads: EmailThread[] = [];
-    const errors: string[] = [];
-
-    for (const res of results) {
-      if (res.status === 'fulfilled') {
-        allThreads.push(...res.value);
-      } else {
-        errors.push(res.reason?.message || 'Failed to fetch account');
-      }
-    }
-
-    if (allThreads.length === 0 && errors.length === accounts.length) {
-      throw new Error(errors.join('; '));
-    }
-
-    return allThreads
-      .sort((a, b) => new Date(b.receivedAt).getTime() - new Date(a.receivedAt).getTime())
-      .slice(0, Math.max(maxResults, 15));
+    return threads;
   } catch (err: any) {
     console.error('Error fetching emails from Gmail:', err.message);
     throw err;
@@ -643,7 +695,12 @@ export async function sendBriefingEmail(
   recipientEmail: string,
   openReminders: ReminderTask[] = []
 ): Promise<boolean> {
-  const accessToken = await getFreshAccessToken();
+  const accounts = await getConnectedGoogleAccounts();
+  const normalizedRecipient = recipientEmail.trim().toLowerCase();
+  const orderedAccounts = [
+    ...accounts.filter(a => a.email.toLowerCase() === normalizedRecipient),
+    ...accounts.filter(a => a.email.toLowerCase() !== normalizedRecipient),
+  ];
 
   const formattedDate = new Date(briefing.generatedAt).toLocaleDateString('en-MY', {
     timeZone: 'Asia/Kuala_Lumpur',
@@ -747,19 +804,32 @@ export async function sendBriefingEmail(
     .replace(/\//g, '_')
     .replace(/=+$/, '');
 
-  const sendRes = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ raw: encodedMessage }),
-  });
+  const candidates: Array<string | undefined> =
+    orderedAccounts.length > 0 ? orderedAccounts.map(a => a.refreshToken) : [undefined];
 
-  const sendData = await sendRes.json();
-  if (sendData.error) {
-    throw new Error(`Gmail send error (${sendData.error.code}): ${sendData.error.message}`);
+  let lastError: Error | null = null;
+  for (const refreshToken of candidates) {
+    try {
+      const accessToken = await getFreshAccessToken(refreshToken);
+      const sendRes = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ raw: encodedMessage }),
+      });
+
+      const sendData = await sendRes.json();
+      if (sendData.error) {
+        throw new Error(`Gmail send error (${sendData.error.code}): ${sendData.error.message}`);
+      }
+
+      return true;
+    } catch (err: any) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+    }
   }
 
-  return true;
+  throw lastError || new Error('Failed to send briefing email from all connected Google accounts');
 }
